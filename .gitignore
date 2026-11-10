@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Originales del usuario: privados, no se versionan
+sources/
+
+# Configuración personal de Claude Code
+.claude/settings.local.json
+
+# Temporales de revisión visual y respaldos de re-extracción
+revision.png
+*.anterior.md
