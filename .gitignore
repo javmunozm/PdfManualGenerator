@@ -1,14 +1,20 @@
+# Este repositorio guarda solo el flujo de trabajo: scripts, pruebas, hooks, skills,
+# agentes y documentación. Los documentos y sus resultados no se versionan.
+
+# Documentos del usuario y todo lo que se deriva de ellos
+sources/
+extracted/
+documentos/
+output/
+
 # Python
 __pycache__/
 *.pyc
 .pytest_cache/
 
-# Originales del usuario: privados, no se versionan
-sources/
-
 # Configuración personal de Claude Code
 .claude/settings.local.json
 
-# Temporales de revisión visual y respaldos de re-extracción
+# Temporales
 revision.png
 *.anterior.md

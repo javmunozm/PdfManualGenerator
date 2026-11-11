@@ -3,7 +3,8 @@
 Fecha: 10/11/2026. Alcance: `manual.py`, `tools/extraer.py`, `tools/comparar.py`,
 `docs/`, `README.md`, la demostración incluida y la configuración de Claude Code.
 
-Este documento **no cambia nada**: registra lo que falla y lo que falta implementar.
+Este documento registra lo que falla y lo que falta implementar. El estado de cada
+punto está en la sección 1.1.
 
 ---
 
@@ -11,8 +12,8 @@ Este documento **no cambia nada**: registra lo que falla y lo que falta implemen
 
 | Componente | Crítico | Alto | Medio | Bajo |
 |---|---|---|---|---|
-| Extractor (`tools/extraer.py`) | 3 | 4 | 6 | 2 |
-| Generador (`manual.py`) | 0 | 7 | 4 | 2 |
+| Extractor (`tools/extraer.py`) | 3 | 5 | 6 | 2 |
+| Generador (`manual.py`) | 0 | 9 | 4 | 2 |
 | Verificador (`tools/comparar.py`) | 1 | 2 | 2 | 0 |
 | Documentación y estructura | 0 | 1 | 4 | 0 |
 | Configuración de Claude Code | 0 | 2 | 2 | 0 |
@@ -35,6 +36,27 @@ Los cinco hallazgos que más importan:
 Lo que sí funciona: la ida y vuelta de `ejemplo.pdf` conserva 21 de 21 marcadores y el
 99,5% de las palabras; las tablas de líneas horizontales se reconstruyen; los scripts
 escriben a archivos y muestran pocas líneas en la terminal.
+
+### 1.1 Estado (10/11/2026: fases 1 y 2 implementadas)
+
+| Estado | Puntos |
+|---|---|
+| **Resuelto**, con prueba en `tests/` | E1, E2, E3, E9, E16, G14, G15, C1, C2, C3, C4, K2 (hook H1 y H2), D5 (base de pruebas: 29) |
+| **Resuelto**, sin prueba automática | K1 (`CLAUDE.md`), D4 (git, `.gitignore`), D2 (`README.md`) |
+| **Parcial** | C5: mensaje claro para otros formatos; sigue sin compararlos ni comparar estructura. D3: `requirements.txt` y revisión visual sin `pypdfium2`; falta `tools/revisar.py`. K3: contexto de este proyecto en `.claude/settings.local.json`; la configuración global no se tocó. E8: `comparar.py` ya une las palabras cortadas; el reporte del extractor todavía no. |
+| **Pendiente** | Todo lo demás (fases 3 a 6) y T1. |
+
+Notas sobre lo resuelto:
+
+- **E3** resuelve la *detección*: el reporte ahora dice qué falta y en qué parte del
+  archivo. Que el extractor recoja ese contenido solo sigue pendiente (E5, E12).
+- **E16** se probó con un PDF de prueba que imita el caso (recuadro con letra grande,
+  renglones partidos, sangría por posición, pie de dos líneas lejos del borde). No se
+  probó con el manual real: requiere permiso para usar ese archivo de `sources/`.
+- **Los hooks** se probaron entregándoles llamadas simuladas. Para que queden activos
+  hay que abrir `/hooks` una vez o reiniciar Claude Code.
+- Las demostraciones antiguas (`extracted/ejemplo/`, `output/ejemplo_regenerado.pdf`)
+  ya no se versionan; D1 sigue pendiente.
 
 ---
 
@@ -74,6 +96,7 @@ frecuente o con aviso. **Bajo** = detalle.
 | E13 | Medio | El reporte nunca llega al estado "terminado" que define `extractor.md`: lista como "pendientes de describir" figuras que ya tienen pie, y marca portada e índice como páginas "que requieren revisión". No hay código de salida. | Verificado en `extracted/ejemplo/reporte.md`: `p4-img47.png` figura como pendiente y el `.md` ya trae su pie. | Separar "informativo" de "pendiente". Listar solo figuras con `FIGURA: describir`. Terminar con código 0 (completo) o 1 (pendientes). |
 | E14 | Bajo | Cabecera: el título se toma de metadatos sin valor ("(anonymous)", "Microsoft Word - x.docx"); la `institucion` de la portada no pasa a la cabecera si no tiene etiqueta. | Probado "(anonymous)". En la demo se perdió "MATERIAL DE CLASE". | Descartar títulos de una lista conocida y usar el texto más grande de la portada; tomar como institución la primera línea de la portada. |
 | E15 | Bajo | Mensajes: archivo inexistente o PDF protegido terminan en traza de Python. El índice solo se detecta si tiene puntos guía. La estimación de tokens (caracteres / 4) es optimista para español. | Lectura. | Mensajes de una línea; detectar el índice también por los marcadores; dividir por 3,5. |
+| E16 | Alto | Código de un PDF con recuadros de letra grande: los renglones que el original partió por ancho quedan como renglones separados (cadenas cortadas a la mitad), se pierde la sangría y el pie de página queda dentro del bloque si está lejos del borde ("Page 95 of 168"). El manual regenerado hereda el código roto. | Reportado por el usuario con dos fragmentos. Reproducido con un PDF de prueba. | **Resuelto.** Sangría por posición; los renglones se reúnen cuando la primera palabra del siguiente no habría cabido en el anterior (el ancho sale del recuadro de fondo o del texto normal); se omite el renglón idéntico, o el contador de páginas, que ocupa la misma posición en la mitad de las páginas o más. El reporte dice cuántos renglones reunió. |
 
 ---
 
@@ -94,6 +117,8 @@ frecuente o con aviso. **Bajo** = detalle.
 | G11 | Medio | Encabezado, pie y portada no recortan textos largos: título y curso se superponen, el capítulo se monta sobre "Página X de Y", el autor se sale de la portada. | Probado y revisado en imagen. | Recortar con "…" según el ancho disponible; en la portada, usar párrafos. |
 | G12 | Bajo | Un título de sección queda solo al final de la página cuando lo sigue una figura. | Probado con 22 a 25 párrafos previos. | `keepWithNext` en títulos. |
 | G13 | Bajo | Un documento sin capítulos `#` (lo que produce el extractor para PowerPoint y Excel) numera "0.1, 0.2". `fecha:` vacía deja la portada sin fecha en vez de usar la de hoy. | Probado ambos. | No numerar niveles sin padre, o avisar. Tratar el valor vacío como ausente. |
+| G14 | Alto | Todos los marcadores y todos los enlaces del índice llevan a la portada. Las páginas se escriben al final (para poder poner "Página X de Y") y el contador de páginas no avanzaba mientras se registraban los destinos. | Verificado en `ejemplo.pdf`: los 21 marcadores apuntaban a la página 1. Encontrado al implementar la fase 2. | **Resuelto.** El contador avanza en cada página diferida y se reinicia al escribir. `ejemplo.pdf` regenerado. |
+| G15 | Alto | Recuadros de código: un renglón más largo que el recuadro se cortaba en cualquier letra, a mitad de palabra, y la continuación se confundía con un renglón nuevo. | Reportado por el usuario. | **Resuelto.** Cada renglón ocupa un renglón: primero se reduce la letra del bloque (8,5 → 7 pt, unos 100 caracteres); si aun así no cabe, se parte en un espacio, con sangría mayor y una marca gris dibujada (no es texto: no ensucia al copiar). Un renglón no se separa de su continuación al cambiar de página. |
 
 ---
 
@@ -204,6 +229,15 @@ Reglas de permiso que acompañan a H1: `deny` para `Edit(./sources/**)` y
 | `describir-figuras` | Recibe la lista de `assets/` pendientes; abre cada imagen; escribe el pie y el comentario `<!-- DESCRIPCIÓN -->` o la tabla de datos del gráfico; transcribe las páginas escaneadas. Devuelve solo un resumen. | Las imágenes son lo más caro en tokens: quedan fuera de la conversación principal. |
 | `revisor-visual` | Abre la hoja de `revisar.py` y devuelve una lista de problemas (o "sin observaciones"). | Igual que el anterior. |
 
+### 9.6 Verificar traducciones (T1)
+
+Regla nueva: los manuales de programación, ingeniería, física y matemática se traducen al
+inglés (excepción: `Manual_Curso_IA_Python_v2`). `comparar.py` compara palabras, así que
+no sirve entre un original en español y un PDF en inglés. Falta una comprobación entre
+idiomas: mismos títulos en el mismo orden, misma cantidad de tablas, figuras y enlaces,
+bloques de código idénticos y las mismas cifras en el mismo orden. Hasta entonces esa
+revisión es manual (`docs/generator.md`, sección 4, paso 5).
+
 ### 9.5 `CLAUDE.md` del proyecto
 
 Máximo 40 líneas: propósito y flujo; las reglas de oro (permiso por archivo para
@@ -232,4 +266,6 @@ nunca el PDF; resultados a archivos, resúmenes a la terminal); los comandos; y 
   `README.md`, ni cómo se comporta el extractor con los documentos reales.
 - PDF escaneados, de dos columnas y con gráficos vectoriales: solo lectura de código.
 - Los puntos marcados **Lectura**.
-- Los hooks, skills y subagentes de la sección 9 son diseño, no se probaron.
+- H1 y H2 se probaron con llamadas simuladas, no en una sesión real. H3 a H5, las
+  skills y los subagentes de la sección 9 siguen siendo diseño.
+- E16 (código partido) y la regla del pie lejos del borde: solo con PDF de prueba.

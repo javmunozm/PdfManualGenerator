@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python manual.py *)",
+      "Bash(python -m unittest *)",
+      "PowerShell(python manual.py *)",
+      "PowerShell(python -m unittest *)"
+    ],
+    "ask": [
+      "Read(./sources/**)"
+    ],
+    "deny": [
+      "Edit(./sources/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Edit|Write|NotebookEdit|Glob|Grep|Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/guardia.py\"",
+            "shell": "bash",
+            "timeout": 10,
+            "statusMessage": "Revisando reglas de sources/..."
+          }
+        ]
+      }
+    ]
+  }
+}

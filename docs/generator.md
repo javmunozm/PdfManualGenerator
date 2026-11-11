@@ -30,7 +30,7 @@ output/<nombre>.pdf                 resultado
 python manual.py documentos/<nombre>/<nombre>.md -o output/<nombre>.pdf
 ```
 
-La terminal muestra la ruta y el peso del PDF. Requisitos: `pip install reportlab pillow`.
+La terminal muestra la ruta y el peso del PDF. Requisitos: `pip install -r requirements.txt`.
 
 ---
 
@@ -89,10 +89,38 @@ python manual.py documentos/<nombre>/<nombre>.md -o output/<nombre>.pdf
 python tools/comparar.py sources/<original>.pdf output/<nombre>.pdf
 ```
 
-`comparar.py` muestra páginas y marcadores (antes → después) y las palabras del original
-que faltan en el PDF nuevo. Las únicas faltas aceptables son textos que se reemplazan a
-propósito (por ejemplo, el índice o un encabezado antiguo). Cualquier otra falta se corrige
-en el `.md` y se vuelve a generar.
+`comparar.py` termina con `RESULTADO: CORRECTO` (código 0) o `RESULTADO: FALLA` (código 1).
+Cuenta repeticiones, no solo palabras distintas, e informa:
+
+| Línea del resultado | Significa | Qué hacer |
+|---|---|---|
+| `Faltan` | Texto del origen que no está en el PDF, con su página o línea. | Corregir el `.md` y regenerar. |
+| `Cifras con otras palabras alrededor` | Una cifra está, pero en otro lugar. | Revisar esa frase: puede ser un dato cambiado. |
+| `Portada: faltan` | Datos de la portada original que no llegaron. | Pasarlos a la cabecera. |
+| `Aviso: sobran` | Texto del PDF que no está en el origen. | Normal si se agregó un pie de figura o una tabla de datos; si no, quitarlo. |
+| `Aviso: ... pares de palabras` | Orden o contexto distinto. | Normal en tablas de celdas largas; revisar si es mucho. |
+
+Las únicas faltas aceptables son textos que se reemplazan a propósito. Se declaran, no se
+ignoran en silencio:
+
+```
+python tools/comparar.py ORIGEN.pdf output/X.pdf --ignorar "Encabezado antiguo" --ignorar-paginas 2
+```
+
+`--ignorar-paginas` sirve para un índice del original que el extractor no reconoció.
+
+### Paso 5: traducir (solo manuales técnicos)
+
+Los manuales de programación, ingeniería, física y matemática se trabajan en inglés
+(regla 2 de `CLAUDE.md`; excepción: `Manual_Curso_IA_Python_v2`).
+
+1. Traducir `documentos/<nombre>/<nombre>.md` completo, por secciones, sin resumir.
+2. No tocar: bloques de código, comandos, nombres de archivos, fórmulas, cifras ni rutas
+   de imágenes.
+3. Generar y verificar contra el `.md` traducido (caso C, con `--estricto`).
+4. `comparar.py` no puede comparar el PDF en inglés con el original en español: compara
+   palabras. La fidelidad de la traducción se revisa con `extracted/` al lado: mismos
+   títulos, mismas tablas, mismo código y mismas cifras.
 
 ---
 
@@ -109,7 +137,12 @@ en el `.md` y se vuelve a generar.
 python tools/comparar.py documentos/<nombre>/<nombre>.md output/<nombre>.pdf
 ```
 
-Debe dar 100% cubierto.
+Debe terminar en `RESULTADO: CORRECTO`. Con `--estricto`, tampoco puede sobrar texto ni
+cambiar el orden:
+
+```
+python tools/comparar.py documentos/<nombre>/<nombre>.md output/<nombre>.pdf --estricto
+```
 
 ---
 
@@ -157,7 +190,7 @@ dpi_imagenes: 150
 | Negrita, cursiva, código, enlace | `**texto**`, `*texto*`, `` `texto` ``, `[texto](https://...)` |
 | Lista con viñetas / numerada | `- ítem` / `1. ítem` |
 | Tabla | `\| A \| B \|` + `\|---\|---\|` + filas |
-| Código | bloque entre ```` ``` ```` |
+| Código | bloque entre ```` ``` ````. Cada renglón queda entero: si no cabe, se reduce la letra del bloque (hasta 7 pt, unos 100 caracteres); si aun así no cabe, se parte en un espacio y la continuación lleva una marca gris. |
 | Cuadro destacado | `> [!NOTA]`, `[!CONSEJO]`, `[!ADVERTENCIA]`, `[!IMPORTANTE]`, `[!EJERCICIO]` (+ título opcional) |
 | Cita simple | `> texto` |
 | Imagen con pie | `![pie de figura](ruta/imagen.png)` en una línea sola |
@@ -172,14 +205,15 @@ simples, filas repetidas o un párrafo "Notas" al final de la sección.
 ## 8. Verificación final
 
 - [ ] `manual.py` terminó sin errores y el peso es razonable (texto: decenas de KB; con imágenes, según `dpi_imagenes`).
-- [ ] `comparar.py` sin faltas inesperadas.
+- [ ] `comparar.py` termina en `RESULTADO: CORRECTO` (código 0).
 - [ ] Revisión visual **mínima**: renderizar solo la portada, el índice y 1-2 páginas con tablas o
       figuras, varias por imagen y a escala baja. No revisar todas las páginas una por una.
 
 ```
-python -c "import pypdfium2 as p; from PIL import Image; d=p.PdfDocument('output/X.pdf'); \
-ims=[d[i].render(scale=0.8).to_pil() for i in (0,1,2,3)]; w,h=ims[0].size; \
-s=Image.new('RGB',(w*4,h),'white'); [s.paste(im,(i*w,0)) for i,im in enumerate(ims)]; s.save('revision.png')"
+python -c "import pymupdf,tempfile,os; s=pymupdf.open('output/X.pdf'); n=min(4,len(s)); r=s[0].rect; \
+o=pymupdf.open(); p=o.new_page(width=r.width*n,height=r.height); \
+[p.show_pdf_page(pymupdf.Rect(i*r.width,0,(i+1)*r.width,r.height),s,i) for i in range(n)]; \
+f=os.path.join(tempfile.gettempdir(),'revision.png'); p.get_pixmap(dpi=58).save(f); print(f)"
 ```
 
 - [ ] El índice tiene todos los títulos y los marcadores funcionan.
@@ -190,7 +224,7 @@ s=Image.new('RGB',(w*4,h),'white'); [s.paste(im,(i*w,0)) for i,im in enumerate(i
 
 - Partir siempre desde `extracted/` o `documentos/`, nunca desde el original.
 - Para cambios, usar ediciones puntuales sobre el `.md`; no reescribir el archivo completo.
-- Verificar con `comparar.py` (unas pocas líneas) en vez de leer el PDF generado.
+- Verificar con `comparar.py` (unas pocas líneas y un código de salida) en vez de leer el PDF generado.
 - Para la revisión visual, una sola imagen con varias páginas a escala baja.
 - No imprimir el contenido del PDF en la terminal.
 

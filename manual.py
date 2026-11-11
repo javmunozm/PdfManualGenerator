@@ -33,6 +33,10 @@ from reportlab.platypus import (
 )
 from reportlab.platypus.tableofcontents import TableOfContents
 
+for _s in (sys.stdout, sys.stderr):   # la consola de Windows (cp1252) no admite todo Unicode
+    if hasattr(_s, "reconfigure"):
+        _s.reconfigure(encoding="utf-8", errors="replace")
+
 # ---------------------------------------------------------------------------
 # Configuración por defecto (se puede cambiar en la cabecera del .md)
 # ---------------------------------------------------------------------------
@@ -139,41 +143,62 @@ def inline(text, link_color="#1F4E79"):
 # Bloque de código con fondo, que se puede dividir entre páginas
 # ---------------------------------------------------------------------------
 class CodeBlock(Flowable):
-    FONT, SIZE, LEADING, PAD = "Courier", 8.5, 11, 6
+    """Recuadro de código en el que cada renglón del código ocupa un renglón.
 
-    def __init__(self, lines, accent, wrapped=False):
+    Si algún renglón no cabe, primero se reduce la letra de todo el bloque (hasta
+    MIN_SIZE). Solo si aun así no cabe se parte: en un espacio, con sangría mayor que la
+    del renglón y una marca gris al inicio, para que se vea que es continuación.
+    """
+    FONT, SIZE, MIN_SIZE, PAD, GLYPH = "Courier", 8.5, 7.0, 6, 0.6   # GLYPH: ancho / tamaño
+
+    def __init__(self, lines, accent, rows=None, size=None):
         super().__init__()
-        self.raw_lines = lines
+        self.raw_lines = [ln.expandtabs(4) for ln in lines]
         self.accent = accent
-        self.wrapped = wrapped
-        self.lines = lines
+        self.rows = rows          # [(texto, es_continuación)], ya calculado al dividir
+        self.size = size
 
-    def _wrap_lines(self, width):
-        char_w = stringWidth("M", self.FONT, self.SIZE)
-        max_chars = max(10, int((width - 2 * self.PAD - 4) / char_w))
-        out = []
+    def _layout(self, width):
+        avail = width - 2 * (self.PAD + 4)        # mismo margen interior a ambos lados
+        longest = max((len(ln.rstrip()) for ln in self.raw_lines), default=1) or 1
+        size = self.SIZE
+        if longest * self.GLYPH * size > avail:
+            size = max(self.MIN_SIZE, int(avail / (self.GLYPH * longest) * 10) / 10)
+        max_chars = max(20, int(avail / (self.GLYPH * size)))
+        rows = []
         for line in self.raw_lines:
-            line = line.expandtabs(4)
+            line = line.rstrip()
+            indent = len(line) - len(line.lstrip(" "))
+            hang = " " * min(indent + 4, max_chars // 2)
+            cont = False
             while len(line) > max_chars:
-                out.append(line[:max_chars])
-                line = "  " + line[max_chars:]
-            out.append(line)
-        return out
+                lead = len(line) - len(line.lstrip(" "))
+                cut = line.rfind(" ", max(lead + 1, max_chars // 2), max_chars + 1)
+                if cut < 0:
+                    cut = max_chars               # sin espacios: corte forzado
+                rows.append((line[:cut].rstrip(), cont))
+                line = hang + line[cut:].lstrip(" ")
+                cont = True
+            rows.append((line, cont))
+        return size, rows
 
     def wrap(self, availWidth, availHeight):
         self.width = availWidth
-        if not self.wrapped:
-            self.lines = self._wrap_lines(availWidth)
-        self.height = len(self.lines) * self.LEADING + 2 * self.PAD
+        if self.rows is None:
+            self.size, self.rows = self._layout(availWidth)
+        self.leading = round(self.size * 1.3, 2)
+        self.height = len(self.rows) * self.leading + 2 * self.PAD
         return self.width, self.height
 
     def split(self, availWidth, availHeight):
         self.wrap(availWidth, availHeight)
-        fit = int((availHeight - 2 * self.PAD) / self.LEADING)
-        if fit < 3 or fit >= len(self.lines):
+        fit = int((availHeight - 2 * self.PAD) / self.leading)
+        while 0 < fit < len(self.rows) and self.rows[fit][1]:
+            fit -= 1                              # no separar un renglón de su continuación
+        if fit < 3 or fit >= len(self.rows):
             return []
-        return [CodeBlock(self.lines[:fit], self.accent, wrapped=True),
-                CodeBlock(self.lines[fit:], self.accent, wrapped=True)]
+        return [CodeBlock([], self.accent, self.rows[:fit], self.size),
+                CodeBlock([], self.accent, self.rows[fit:], self.size)]
 
     def draw(self):
         c = self.canv
@@ -182,11 +207,21 @@ class CodeBlock(Flowable):
         c.roundRect(0, 0, self.width, self.height, 3, fill=1, stroke=1)
         c.setFillColor(self.accent)
         c.rect(0, 0, 2.5, self.height, fill=1, stroke=0)
+        x0, cw = self.PAD + 4, self.GLYPH * self.size
+        y = self.height - self.PAD - self.size
+        c.setStrokeColor(colors.HexColor("#8C8C8C"))
+        c.setLineWidth(0.7)
+        for text, cont in self.rows:               # marca de continuación (dibujo, no texto)
+            if cont:
+                x = x0 + (len(text) - len(text.lstrip(" ")) - 2.2) * cw
+                c.lines([(x, y + self.size * 0.75, x, y + self.size * 0.25),
+                         (x, y + self.size * 0.25, x + 1.3 * cw, y + self.size * 0.25)])
+            y -= self.leading
         c.setFillColor(colors.HexColor("#262626"))
-        tx = c.beginText(self.PAD + 4, self.height - self.PAD - self.SIZE)
-        tx.setFont(self.FONT, self.SIZE, self.LEADING)
-        for line in self.lines:
-            tx.textLine(line)
+        tx = c.beginText(x0, self.height - self.PAD - self.size)
+        tx.setFont(self.FONT, self.size, self.leading)
+        for text, _ in self.rows:
+            tx.textLine(text)
         c.drawText(tx)
 
 
@@ -588,9 +623,13 @@ def make_canvas(doc):
         def showPage(self):
             self._pages.append(dict(self.__dict__))
             self._startPage()
+            # Las páginas se escriben recién en save(). El contador debe avanzar aquí para
+            # que cada marcador y cada enlace del índice apunte a su página y no a la primera.
+            self._doc.pageCounter += 1
 
         def save(self):
             total = len(self._pages)
+            self._doc.pageCounter = 1
             for state in self._pages:
                 self.__dict__.update(state)
                 if self._pageNumber > 1:

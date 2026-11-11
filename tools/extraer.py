@@ -15,20 +15,31 @@ Genera, en extracted/<nombre>/:
 Método y reglas: docs/extractor.md
 """
 import argparse
+import hashlib
+import io
+import json
 import re
+import sys
+import zipfile
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 
 import pymupdf
+
+for _s in (sys.stdout, sys.stderr):   # la consola de Windows (cp1252) no admite todo Unicode
+    if hasattr(_s, "reconfigure"):
+        _s.reconfigure(encoding="utf-8", errors="replace")
 
 MONO = re.compile(r"mono|courier|consol|code|menlo", re.I)
 BULLET = re.compile(r"^\s*[•●▪◦‣∙·–]\s*")
 LEADER = re.compile(r"(?:\.\s*){5,}")
 CAPTION = re.compile(r"^(figura|fig\.|imagen|gr[aá]fico|diagrama|esquema)\b", re.I)
 NUM_HEAD = re.compile(r"^\d+(\.\d+)*\.?\s+\S")
-PAGE_NUM = re.compile(r"^(p[aá]g(ina)?\.?\s*)?\d+(\s*(de|/|of)\s*\d+)?$", re.I)
+PAGE_NUM = re.compile(r"^(p[aá]g(ina|e)?\.?\s*)?\d+(\s*(de|/|of)\s*\d+)?$", re.I)
 WORD = re.compile(r"[\wáéíóúüñ]+", re.I)
 MARGIN = 0.065  # franja superior/inferior donde viven encabezados y pies
+BAND = 0.15     # franja donde se busca texto repetido en la misma posición
 COL_GAP = 9     # hueco mínimo (pt) entre columnas; un espacio normal mide menos
 
 
@@ -99,33 +110,76 @@ def body_size(doc):
     return c.most_common(1)[0][0] if c else 10
 
 
-def find_boilerplate(doc):
-    """Líneas repetidas en la franja de encabezado/pie (o con número de página)."""
-    seen, zone_pages = Counter(), Counter()
+def zone_of(y0, y1, h):
+    return "top" if y1 < h * MARGIN else "bot" if y0 > h * (1 - MARGIN) else None
+
+
+def band_of(y0, y1, h):
+    return "top" if y1 < h * BAND else "bot" if y0 > h * (1 - BAND) else None
+
+
+def slot_key(text):
+    """Identidad de un renglón repetido: su texto exacto, o "contador de páginas".
+    No se enmascaran cifras: "Ejercicio 3" y "Ejercicio 4" son renglones distintos."""
+    return "\x00pagina" if PAGE_NUM.match(text) else text.lower()
+
+
+def find_boilerplate(doc, body, toc=()):
+    """Reúne lo necesario para reconocer encabezados y pies repetidos.
+
+    Una línea de la franja de encabezado/pie se elimina solo si se repite en otra
+    página, si es un número de página o si repite un título o una línea del cuerpo.
+    El texto que aparece una sola vez (una nota al pie) se conserva en el cuerpo.
+    Más adentro de esa franja se elimina además el renglón que está en el extremo de la
+    página y aparece idéntico (o es el contador de páginas) en la misma posición en la
+    mitad de las páginas o más: un pie colocado lejos del borde. Los títulos, de letra
+    más grande, no entran en esa regla.
+    """
+    seen, texts, slots, right = Counter(), set(), {}, 0
     for page in doc:
         h = page.rect.height
-        found = {"top": False, "bot": False}
+        page_keys, inner = set(), []
         for b in page.get_text("dict")["blocks"]:
             for ln in b.get("lines", []):
+                text = norm("".join(s["text"] for s in ln["spans"]))
+                if not text:
+                    continue
                 y0, y1 = ln["bbox"][1], ln["bbox"][3]
-                zone = "top" if y1 < h * MARGIN else "bot" if y0 > h * (1 - MARGIN) else None
-                if zone:
-                    found[zone] = True
-                    seen[(zone, key("".join(s["text"] for s in ln["spans"])))] += 1
-        for z, v in found.items():
-            zone_pages[z] += v
-    n = doc.page_count
-    running = {z for z, c in zone_pages.items() if n >= 3 and c >= 0.6 * n}
-    return seen, running
+                if zone_of(y0, y1, h):
+                    page_keys.add((zone_of(y0, y1, h), key(text)))
+                else:
+                    texts.add(text.lower())
+                    if not all(MONO.search(s["font"]) for s in ln["spans"] if s["text"].strip()):
+                        right = max(right, ln["bbox"][2])   # borde del texto normal
+                    inner.append(((y0 + y1) / 2, band_of(y0, y1, h), text,
+                                  max(s["size"] for s in ln["spans"])))
+        inner.sort()
+        for y, band, text, size in inner[:2] + inner[-2:]:   # solo los renglones extremos
+            if band:
+                slots.setdefault((band, slot_key(text)), {})[page.number] = (y, size)
+        seen.update(page_keys)
+    need = max(3, 0.5 * doc.page_count)
+    fixed = {}
+    for k, per_page in slots.items():
+        ys = sorted(v[0] for v in per_page.values())
+        small = max(v[1] for v in per_page.values()) <= body * 1.05
+        if len(ys) >= need and ys[-1] - ys[0] <= 4 and small:
+            fixed[k] = ys[len(ys) // 2]      # los títulos (letra grande) no entran
+    return dict(seen=seen, texts=texts, fixed=fixed, right=right,
+                titles={norm(x[1]).lower() for x in toc})
 
 
-def is_boiler(line_text, bbox, page_h, seen, running):
-    y0, y1 = bbox[1], bbox[3]
-    zone = "top" if y1 < page_h * MARGIN else "bot" if y0 > page_h * (1 - MARGIN) else None
-    if not zone:
-        return False
-    return (zone in running or seen[(zone, key(line_text))] >= 2
-            or bool(PAGE_NUM.match(norm(line_text))))
+def is_boiler(line_text, bbox, page_h, bp):
+    """¿Es un encabezado o pie repetido? (criterio en find_boilerplate)"""
+    t = norm(line_text)
+    k, y0, y1 = key(t), bbox[1], bbox[3]
+    zone = zone_of(y0, y1, page_h)
+    if zone and (PAGE_NUM.match(t) or bp["seen"][(zone, k)] >= 2
+                 or t.lower() in bp["titles"] or t.lower() in bp["texts"]):
+        return True
+    band = band_of(y0, y1, page_h)
+    y = bp["fixed"].get((band, slot_key(t))) if band else None
+    return y is not None and abs((y0 + y1) / 2 - y) <= 4
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +218,62 @@ def save_pixmap(pix, path):
     if pix.colorspace and pix.colorspace.n > 3:
         pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
     pix.save(str(path))
+
+
+# ---------------------------------------------------------------------------
+# Bloques de código
+# ---------------------------------------------------------------------------
+def rebuild_code(lines, right):
+    """Reconstruye el código tal como se escribió. Devuelve (texto, renglones reunidos).
+
+    `lines` son renglones (texto, x0, x1, y0, y1, tamaño de letra).
+    - Sangría: si el PDF la da por posición (sin espacios), se calcula con el ancho de letra.
+    - Renglones vacíos: solo donde hay una separación vertical real.
+    - Renglones partidos: cuando el original cortó un renglón porque no cabía en el
+      recuadro, las partes se reúnen. Se reconoce porque la primera palabra del renglón
+      siguiente no habría cabido al final del anterior. `right` es el borde útil
+      (el del recuadro o el del texto normal); sin ese dato no se reúne nada.
+    """
+    per_char = sorted((x1 - x0) / len(t) for t, x0, x1, *_ in lines
+                      if len(t) >= 8 and t == t.strip())
+    cw = per_char[len(per_char) // 2] if per_char else 0.6 * lines[0][5]
+    rows = []                                   # une fragmentos de un mismo renglón
+    for text, x0, x1, y0, y1, _ in sorted(lines, key=lambda l: (round(l[3]), l[1])):
+        if rows and abs(rows[-1][2] - y0) < 2:
+            gap = max(1, round((x0 - rows[-1][1]) / cw) - len(rows[-1][0]))
+            rows[-1][0] += " " * gap + text
+        else:
+            rows.append([text, x0, y0])
+    left = min(r[1] for r in rows)
+    steps = sorted(b[2] - a[2] for a, b in zip(rows, rows[1:]) if b[2] - a[2] > 1)
+    step = steps[len(steps) // 2] if steps else 1.2 * lines[0][5]
+    cols = int((right - left) / cw + 0.05) if right else 0   # letras que caben por renglón
+    out, joined, prev = [], 0, None
+    for text, x0, y0 in rows:
+        text = text.rstrip()
+        lead = max(0, round((x0 - left) / cw))
+        gap_rows = round((y0 - prev[1]) / step) - 1 if prev else 0
+        first = text.strip().split(" ")[0]
+        if (prev and cols and gap_rows <= 0 and prev[0] >= 0.6 * cols
+                and prev[0] + 1 + len(first) > cols):
+            out[-1] += " " + text.strip()
+            joined += 1
+        else:
+            out += [""] * max(0, min(gap_rows, 3))
+            out.append(" " * lead + text)
+        prev = (lead + len(text), y0)             # columna donde termina el renglón visible
+    return "\n".join(out), joined
+
+
+def code_right(boxes, lines, fallback):
+    """Borde derecho útil del recuadro que contiene el código (o el del texto normal)."""
+    x = min(l[1] for l in lines)
+    y = (lines[0][3] + lines[0][4]) / 2
+    inside = [r for r in boxes if r.x0 <= x <= r.x1 and r.y0 <= y <= r.y1]
+    if not inside:
+        return fallback
+    r = min(inside, key=lambda r: r.get_area())
+    return r.x1 - (x - r.x0)                    # mismo margen interior a ambos lados
 
 
 # ---------------------------------------------------------------------------
@@ -358,6 +468,9 @@ def page_to_md(doc, page, ctx):
         clusters = page.cluster_drawings(drawings=drawings)
     except Exception:
         drawings, clusters = [], []
+    boxes = [pymupdf.Rect(d["rect"]) for d in drawings   # recuadros con fondo (código, cuadros)
+             if d.get("fill") is not None and d["rect"].width > 100 and d["rect"].height > 8]
+    unique = []
 
     # Tablas con solo líneas horizontales (muy comunes en manuales)
     ruled, failed = ruled_tables(page, drawings)
@@ -446,16 +559,18 @@ def page_to_md(doc, page, ctx):
         lines, size, mono, bold = block_lines(b)
         kept = []
         for plain, md, bb in lines:
-            if is_boiler(plain, bb, H, ctx["seen"], ctx["running"]):
+            if is_boiler(plain, bb, H, ctx["bp"]):
                 removed.append(norm(plain))
             else:
+                if zone_of(bb[1], bb[3], H):     # aparece una sola vez: es contenido
+                    unique.append(norm(plain))
                 kept.append((plain, md, bb))
         if not kept:
             continue
         x0, y0 = b["bbox"][0], b["bbox"][1]
         if mono:
-            code = "\n".join(p.rstrip() for p, _, _ in kept)
-            items.append((y0, x0, f"```\n{code}\n```"))
+            items.append((y0, x0, ("CODE", [(p, bb[0], bb[2], bb[1], bb[3], size)
+                                            for p, _, bb in kept if p.strip()])))
             continue
         plain_all = norm(" ".join(p for p, _, _ in kept))
         lvl = heading_level(plain_all, size, bold, len(kept), body, ctx["toc_levels"])
@@ -496,10 +611,19 @@ def page_to_md(doc, page, ctx):
     for i, (y, x, it) in enumerate(items):
         if i in skip:
             continue
-        if isinstance(it, tuple):
+        if isinstance(it, tuple) and it[0] == "CODE":
+            lines, j = list(it[1]), i + 1       # un recuadro puede venir en varios bloques
+            while j < len(items) and isinstance(items[j][2], tuple) and items[j][2][0] == "CODE":
+                lines += items[j][2][1]
+                skip.add(j)
+                j += 1
+            code, n_joined = rebuild_code(lines, code_right(boxes, lines, ctx["bp"]["right"]))
+            ctx["code_joined"] += n_joined
+            out.append(f"```\n{code}\n```")
+        elif isinstance(it, tuple):
             _, name, r = it
             alt = "FIGURA: describir"
-            if i + 1 < len(items) and isinstance(items[i + 1][2], str):
+            if i + 1 not in skip and i + 1 < len(items) and isinstance(items[i + 1][2], str):
                 nxt = items[i + 1]
                 cap = nxt[2].strip("*").strip()
                 looks_caption = (nxt[2].startswith("*") and not nxt[2].startswith("**")) \
@@ -511,6 +635,9 @@ def page_to_md(doc, page, ctx):
             out.append(it)
     if two_cols:
         notes.append("dos columnas: verificar orden")
+    if unique:
+        notes.append("texto único en la zona de encabezado/pie, conservado en el cuerpo "
+                     "(verificar): " + " / ".join(u[:70] for u in unique[:3]))
     body_md = add_links(page, merge_blocks(out))
     return f"<!-- p.{n} -->\n\n" + body_md, notes, removed, raw_lines
 
@@ -596,17 +723,16 @@ def coverage(raw_lines, md, removed):
     return 1 - sum(miss.values()) / total, list(miss)[:10]
 
 
-def extract(pdf_path, out_root):
-    pdf_path = Path(pdf_path)
+def extract(pdf_path, out_dir):
+    pdf_path, out_dir = Path(pdf_path), Path(out_dir)
     doc = pymupdf.open(pdf_path)
-    name = pdf_path.stem
-    out_dir = Path(out_root) / name
+    name = out_dir.name
     assets = out_dir / "assets"
     assets.mkdir(parents=True, exist_ok=True)
 
-    seen, running = find_boilerplate(doc)
     toc = doc.get_toc()
-    ctx = dict(body=body_size(doc), assets=assets, seen=seen, running=running,
+    body = body_size(doc)
+    ctx = dict(body=body, assets=assets, bp=find_boilerplate(doc, body, toc), code_joined=0,
                toc_levels={key(t): lvl - min(x[0] for x in toc) + 1 for lvl, t, _ in toc},
                seen_imgs=set(),
                figures=[], scanned=[], headings=[], pending_bullet=False)
@@ -666,8 +792,11 @@ def extract(pdf_path, out_root):
         f"- Markdown: `{md_file.name}` ({len(md_text):,} caracteres, ~{len(md_text) // 4:,} tokens)",
         f"- Figuras guardadas (describir): {len(ctx['figures'])}",
         f"- Páginas escaneadas (transcribir): {ctx['scanned'] or 'ninguna'}",
-        "",
     ]
+    if ctx["code_joined"]:
+        rep.append(f"- Renglones de código reunidos (el original los partió por ancho): "
+                   f"{ctx['code_joined']}. Verificar una muestra.")
+    rep.append("")
     if report_rows:
         rep += ["## Páginas que requieren revisión", "",
                 "| Pág. | Cobertura | Notas | Palabras faltantes |", "|---|---|---|---|",
@@ -700,30 +829,132 @@ def md_table(rows):
     return "\n".join(lines)
 
 
-def finish(src, out_root, front, body, figures=(), notes=(), src_words=None):
-    """Escribe <nombre>.md y reporte.md (formato común a todos los tipos)."""
-    src = Path(src)
-    out_dir = Path(out_root) / src.stem
+def finish(src, out_dir, front, body, figures=(), notes=(), src_words=None, ref=None):
+    """Escribe <nombre>.md y reporte.md (formato común a todos los tipos).
+
+    La cobertura cuenta apariciones (no solo palabras distintas). `ref` es el texto de
+    referencia leído directo del archivo, por partes: {"parte": Counter de palabras}.
+    """
+    src, out_dir = Path(src), Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     front = {"fuente": src.name, **{k: v for k, v in front.items() if v}}
     head = "---\n" + "\n".join(f"{k}: {v}" for k, v in front.items()) + "\n---\n\n"
     md_text = head + body.strip() + "\n"
-    md_file = out_dir / f"{src.stem}.md"
+    md_file = out_dir / f"{out_dir.name}.md"
     md_file.write_text(md_text, encoding="utf-8")
     rep = [f"# Reporte de extracción: {src.name}", "",
            f"- Markdown: `{md_file.name}` ({len(md_text):,} caracteres, "
            f"~{len(md_text) // 4:,} tokens)",
            f"- Figuras guardadas (describir): {len(figures)}"]
-    if src_words is not None:  # cada palabra distinta del original debe aparecer
-        miss = set(src_words) - set(words(md_text))
-        cov = 1 - len(miss) / (len(src_words) or 1)
-        rep.append(f"- Cobertura de palabras: {cov:.1%}"
-                   + (f" | faltan: {' '.join(list(miss)[:15])}" if miss else ""))
+    parts = ref if ref is not None else ({"": src_words} if src_words is not None else {})
+    if parts:
+        total = Counter()
+        for c in parts.values():
+            total += c
+        miss = total - words(md_text)
+        n_total, n_miss = sum(total.values()) or 1, sum(miss.values())
+        rep.append(f"- Cobertura de palabras: {1 - n_miss / n_total:.1%}"
+                   + (f" | faltan {n_miss} de {n_total}" if n_miss else ""))
+        for label, c in parts.items():           # dónde está lo que falta
+            here = c & miss
+            miss -= here
+            if here:
+                rep.append(f"- **Faltan{' en ' + label if label else ''}:** "
+                           + " ".join(list(here)[:25]))
     rep += [f"- {n}" for n in notes]
     if figures:
         rep += ["", "## Figuras pendientes de describir", "", *[f"- `{f}`" for f in figures]]
     (out_dir / "reporte.md").write_text("\n".join(rep) + "\n", encoding="utf-8")
     return md_file, out_dir / "reporte.md"
+
+
+# ---------------------------------------------------------------------------
+# Texto de referencia leído directo del paquete (ZIP + XML) de Word, PowerPoint y Excel.
+# No pasa por python-docx / python-pptx / openpyxl: sirve para detectar lo que el
+# recorrido de esas bibliotecas no visita (pies, cuadros de texto, notas, SmartArt...).
+# ---------------------------------------------------------------------------
+NS_W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+NS_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+NS_S = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+MC_FALLBACK = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback"
+
+
+def xml_text(data, ns, skip=()):
+    """Texto de un XML de Office: une los fragmentos de cada párrafo y separa párrafos."""
+    import xml.etree.ElementTree as ET
+    out, hidden = [], 0
+    skip = {MC_FALLBACK, *skip}                  # Fallback repite el contenido de Choice
+    for ev, el in ET.iterparse(io.BytesIO(data), events=("start", "end")):
+        if el.tag in skip:
+            hidden += 1 if ev == "start" else -1
+        elif ev == "end" and not hidden:
+            if el.tag == ns + "t":
+                out.append(el.text or "")
+            elif el.tag == ns + "p":
+                out.append("\n")
+            elif el.tag in (ns + "br", ns + "tab", ns + "cr"):
+                out.append(" ")
+    return "".join(out)
+
+
+def package_reference(src, rules, ns, skip=()):
+    """{parte: Counter} con el texto de las partes del paquete que calzan con `rules`."""
+    parts = {}
+    with zipfile.ZipFile(src) as z:
+        for name in sorted(z.namelist()):
+            for pattern, label in rules:
+                if re.fullmatch(pattern, name):
+                    parts.setdefault(label, Counter()).update(words(xml_text(z.read(name), ns, skip)))
+    return parts
+
+
+def package_count(src, pattern, needle):
+    """Cuántas veces aparece `needle` (bytes) en las partes cuyo nombre calza con `pattern`."""
+    with zipfile.ZipFile(src) as z:
+        return sum(z.read(n).count(needle) for n in z.namelist() if re.fullmatch(pattern, n))
+
+
+DOCX_PARTS = [(r"word/document\.xml", "el cuerpo"), (r"word/header\d*\.xml", "encabezados"),
+              (r"word/footer\d*\.xml", "pies de página"), (r"word/footnotes\.xml", "notas al pie"),
+              (r"word/endnotes\.xml", "notas finales"), (r"word/comments\.xml", "comentarios")]
+PPTX_PARTS = [(r"ppt/slides/slide\d+\.xml", "las diapositivas"),
+              (r"ppt/notesSlides/notesSlide\d+\.xml", "las notas del orador"),
+              (r"ppt/diagrams/data\d+\.xml", "SmartArt"), (r"ppt/charts/chart\d+\.xml", "gráficos")]
+
+
+def xlsx_reference(src):
+    """Texto de las celdas y cantidad de celdas con contenido, leídos del XML."""
+    import xml.etree.ElementTree as ET
+    parts, cells = {"las celdas": Counter()}, 0
+    with zipfile.ZipFile(src) as z:
+        names = z.namelist()
+        shared = []
+        if "xl/sharedStrings.xml" in names:
+            for si in ET.fromstring(z.read("xl/sharedStrings.xml")).iter(NS_S + "si"):
+                shared.append("".join(x.text or "" for x in si.iter(NS_S + "t")))
+        for name in sorted(names):
+            if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", name):
+                for c in ET.fromstring(z.read(name)).iter(NS_S + "c"):
+                    v, f, kind = c.find(NS_S + "v"), c.find(NS_S + "f"), c.get("t")
+                    text = None
+                    if kind == "s" and v is not None and (v.text or "").isdigit():
+                        text = shared[int(v.text)] if int(v.text) < len(shared) else ""
+                    elif kind == "inlineStr":
+                        text = "".join(x.text or "" for x in c.iter(NS_S + "t"))
+                    elif kind == "str" and v is not None:
+                        text = v.text or ""
+                    if text is not None:
+                        if text.strip():
+                            cells += 1
+                            parts["las celdas"].update(words(text))
+                    elif (v is not None and (v.text or "").strip()) or f is not None:
+                        cells += 1
+            elif re.fullmatch(r"xl/comments\d+\.xml", name):
+                parts.setdefault("comentarios de celda", Counter()).update(
+                    words(" ".join(x.text or "" for x in ET.fromstring(z.read(name)).iter(NS_S + "t"))))
+            elif re.fullmatch(r"xl/drawings/drawing\d+\.xml", name):
+                parts.setdefault("cuadros de texto", Counter()).update(words(xml_text(z.read(name), NS_A)))
+    return parts, cells
 
 
 def json_to_md(data, level=0):
@@ -767,29 +998,37 @@ def json_scalar(v):
 
 
 def json_words(data):
-    c = Counter()
-    if isinstance(data, dict):
-        for k, v in data.items():
-            c += words(str(k)) + json_words(v)
-    elif isinstance(data, list):
-        for v in data:
-            c += json_words(v)
-    else:
-        c += words(json_scalar(data))
-    return c
+    """Palabras de los valores (con repetición) y de las claves (una vez cada clave:
+    en una tabla la clave se escribe solo en el encabezado)."""
+    values, keys = Counter(), set()
+
+    def walk(x):
+        if isinstance(x, dict):
+            for k, v in x.items():
+                keys.add(str(k))
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+        else:
+            values.update(words(json_scalar(x)))
+    walk(data)
+    for k in keys:
+        values.update(words(k))
+    return values
 
 
-def extract_json(src, out_root):
+def extract_json(src, out_dir):
     import json
     data = json.loads(Path(src).read_text(encoding="utf-8-sig"))
     body = json_to_md(data)
     notes = ["JSON convertido: listas de objetos -> tablas; objetos -> listas `clave: valor`.",
              "Los tipos (número/texto) no se distinguen en el Markdown; el original sigue en sources/."]
-    return finish(src, out_root, {"titulo": Path(src).stem}, body, notes=notes,
+    return finish(src, out_dir, {"titulo": Path(src).stem}, body, notes=notes,
                   src_words=json_words(data))
 
 
-def extract_text(src, out_root):
+def extract_text(src, out_dir):
     text = Path(src).read_text(encoding="utf-8-sig")
     front = {"titulo": Path(src).stem}
     m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
@@ -801,28 +1040,28 @@ def extract_text(src, out_root):
         text = text[m.end():]
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
-    return finish(src, out_root, front, text, src_words=words(text),
+    return finish(src, out_dir, front, text, src_words=words(text),
                   notes=["Texto ya optimizado: solo se limpiaron espacios y líneas vacías."])
 
 
-def extract_csv(src, out_root):
+def extract_csv(src, out_dir):
     import csv
     raw = Path(src).read_text(encoding="utf-8-sig")
     dialect = csv.Sniffer().sniff(raw[:4096], delimiters=",;\t|")
     rows = list(csv.reader(raw.splitlines(), dialect))
-    return finish(src, out_root, {"titulo": Path(src).stem}, md_table(rows),
+    return finish(src, out_dir, {"titulo": Path(src).stem}, md_table(rows),
                   src_words=words(raw), notes=[f"{len(rows)} filas x {max(map(len, rows), default=0)} columnas"])
 
 
-def extract_docx(src, out_root):
+def extract_docx(src, out_dir):
     import docx
     from docx.table import Table as DTable
     from docx.text.paragraph import Paragraph as DPara
     d = docx.Document(src)
-    out_dir = Path(out_root) / Path(src).stem
+    out_dir = Path(out_dir)
     assets = out_dir / "assets"
     assets.mkdir(parents=True, exist_ok=True)
-    figures, parts, all_text = [], [], []
+    figures, parts = [], []
 
     def runs_md(p):
         out = []
@@ -861,7 +1100,6 @@ def extract_docx(src, out_root):
         tag = child.tag.split("}")[1]
         if tag == "p":
             p = DPara(child, d)
-            all_text.append(p.text)
             for name in images_in(p):
                 parts.append(f"![FIGURA: describir](assets/{name})")
             text = runs_md(p).strip()
@@ -880,7 +1118,6 @@ def extract_docx(src, out_root):
         elif tag == "tbl":
             t = DTable(child, d)
             rows = [[c.text for c in r.cells] for r in t.rows]
-            all_text += [c for r in rows for c in r]
             parts.append(md_table(rows))
     # juntar ítems de lista consecutivos
     body = ""
@@ -896,14 +1133,18 @@ def extract_docx(src, out_root):
         hdr = " | ".join(p.text.strip() for s in d.sections for p in s.header.paragraphs if p.text.strip())
         body = f"<!-- ENCABEZADO ORIGINAL: {hdr} -->\n\n" + body
         notes.append("Encabezado del Word guardado como comentario.")
-    return finish(src, out_root, front, body, figures, notes, words("\n".join(all_text)))
+    n_img = package_count(src, r"word/document\.xml", b"<pic:pic")
+    if n_img != len(figures):
+        notes.append(f"**Imágenes en el original: {n_img} | extraídas: {len(figures)}** (revisar)")
+    return finish(src, out_dir, front, body, figures, notes,
+                  ref=package_reference(src, DOCX_PARTS, NS_W))
 
 
-def extract_xlsx(src, out_root):
+def extract_xlsx(src, out_dir):
     import openpyxl
     wb = openpyxl.load_workbook(src, data_only=True, read_only=True)
     wf = openpyxl.load_workbook(src, read_only=True)  # fórmulas, por si no hay valor guardado
-    parts, all_words, notes = [], Counter(), []
+    parts, notes, n_cells = [], [], 0
     for ws in wb.worksheets:
         frows = list(wf[ws.title].iter_rows(values_only=True))
         rows = [[v if v is not None or i >= len(frows) or j >= len(frows[i]) else frows[i][j]
@@ -915,21 +1156,23 @@ def extract_xlsx(src, out_root):
         keep = [j for j in range(max(map(len, rows))) if any(j < len(r) and r[j] not in (None, "") for r in rows)]
         rows = [[r[j] if j < len(r) else "" for j in keep] for r in rows]
         parts.append(f"## Hoja: {ws.title}\n\n{md_table(rows)}")
-        all_words += words(" ".join(esc_cell(v) for r in rows for v in r))
+        n_cells += sum(1 for r in rows for v in r if str(v if v is not None else "").strip())
         notes.append(f"Hoja '{ws.title}': {len(rows)} filas x {len(keep)} columnas")
     notes.append("Se extraen valores calculados; las fórmulas no se copian.")
-    return finish(src, out_root, {"titulo": Path(src).stem}, "\n\n".join(parts), notes=notes,
-                  src_words=all_words)
+    ref, ref_cells = xlsx_reference(src)
+    if ref_cells != n_cells:
+        notes.append(f"**Celdas con contenido en el original: {ref_cells} | extraídas: {n_cells}** (revisar)")
+    return finish(src, out_dir, {"titulo": Path(src).stem}, "\n\n".join(parts), notes=notes, ref=ref)
 
 
-def extract_pptx(src, out_root):
+def extract_pptx(src, out_dir):
     from pptx import Presentation
     from pptx.enum.shapes import MSO_SHAPE_TYPE
     prs = Presentation(src)
-    out_dir = Path(out_root) / Path(src).stem
+    out_dir = Path(out_dir)
     assets = out_dir / "assets"
     assets.mkdir(parents=True, exist_ok=True)
-    parts, figures, all_text = [], [], []
+    parts, figures = [], []
 
     def walk(shapes):
         for sh in shapes:
@@ -940,7 +1183,6 @@ def extract_pptx(src, out_root):
 
     for i, slide in enumerate(prs.slides, 1):
         title = slide.shapes.title.text.strip() if slide.shapes.title is not None and slide.shapes.title.has_text_frame else ""
-        all_text.append(title)
         sec = [f"## Diapositiva {i}" + (f": {title}" if title else "")]
         for sh in sorted(walk(slide.shapes), key=lambda s: (s.top or 0, s.left or 0)):
             if slide.shapes.title is not None and sh.shape_id == slide.shapes.title.shape_id:
@@ -949,11 +1191,9 @@ def extract_pptx(src, out_root):
                 for p in sh.text_frame.paragraphs:
                     t = "".join(r.text for r in p.runs).strip()
                     if t:
-                        all_text.append(t)
                         sec.append("  " * p.level + "- " + t)
             elif getattr(sh, "has_table", False) and sh.has_table:
                 rows = [[c.text for c in r.cells] for r in sh.table.rows]
-                all_text += [c for r in rows for c in r]
                 sec.append("\n" + md_table(rows) + "\n")
             elif sh.shape_type == MSO_SHAPE_TYPE.PICTURE:
                 name = f"d{i}-img{len(figures) + 1}.{sh.image.ext}"
@@ -970,13 +1210,16 @@ def extract_pptx(src, out_root):
         if slide.has_notes_slide:
             notes_t = slide.notes_slide.notes_text_frame.text.strip()
             if notes_t:
-                all_text.append(notes_t)
                 sec.append("\n> **Notas del orador:** " + norm(notes_t))
         parts.append("\n".join(sec))
     cp = prs.core_properties
-    return finish(src, out_root, {"titulo": cp.title or Path(src).stem, "autor": cp.author},
-                  "\n\n".join(parts), figures, [f"{len(prs.slides)} diapositivas"],
-                  words("\n".join(all_text)))
+    notes = [f"{len(prs.slides)} diapositivas"]
+    n_img = package_count(src, r"ppt/slides/slide\d+\.xml", b"<p:pic>")
+    if n_img != len(figures):
+        notes.append(f"**Imágenes en el original: {n_img} | extraídas: {len(figures)}** (revisar)")
+    return finish(src, out_dir, {"titulo": cp.title or Path(src).stem, "autor": cp.author},
+                  "\n\n".join(parts), figures, notes,
+                  ref=package_reference(src, PPTX_PARTS, NS_A, skip=(NS_A + "fld",)))
 
 
 EXTRACTORS = {
@@ -990,19 +1233,82 @@ EXTRACTORS = {
 }
 
 
+def sha256(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def read_manifest(out_dir):
+    try:
+        return json.loads((Path(out_dir) / "fuente.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def plan(src, out_root, forzar):
+    """Decide dónde extraer y si corresponde. Devuelve (carpeta, acción, motivo).
+
+    Acciones: extraer | omitir (ya extraído, original sin cambios) |
+    abortar (se perdería trabajo manual) | respaldar (con --forzar: guarda el .md y extrae).
+    """
+    out_dir = Path(out_root) / src.stem
+    man = read_manifest(out_dir)
+    if man and man.get("archivo") != src.name:      # otro original con el mismo nombre
+        out_dir = Path(out_root) / f"{src.stem}-{src.suffix.lstrip('.').lower()}"
+        man = read_manifest(out_dir)
+    md = out_dir / f"{out_dir.name}.md"
+    if not md.exists():
+        return out_dir, "extraer", ""
+    if man is None:
+        why = "existe una extracción anterior sin registro de su original (fuente.json)"
+    else:
+        edited = sha256(md) != man.get("md_sha256")
+        same = man.get("sha256") == sha256(src)
+        if same and not forzar:
+            return out_dir, "omitir", ("ya extraído y el original no cambió"
+                                       + ("; el .md tiene trabajo manual" if edited else ""))
+        if not edited:
+            return out_dir, "extraer", ""
+        why = "el .md fue editado a mano" + ("" if same else " y el original cambió")
+    return out_dir, ("respaldar" if forzar else "abortar"), why
+
+
 def main():
     ap = argparse.ArgumentParser(description="Extrae un documento a Markdown compacto.")
-    ap.add_argument("archivo", help="archivo en sources/ (pdf, docx, pptx, xlsx, json, md, txt, csv)")
+    ap.add_argument("archivo", help="archivo a extraer (pdf, docx, pptx, xlsx, json, md, txt, csv)")
     ap.add_argument("--salida", default="extracted")
+    ap.add_argument("--forzar", action="store_true",
+                    help="volver a extraer aunque exista; el .md anterior se guarda como respaldo")
     a = ap.parse_args()
-    ext = Path(a.archivo).suffix.lower()
-    fn = EXTRACTORS.get(ext)
+    src = Path(a.archivo)
+    if not src.is_file():
+        print(f"No existe el archivo: {src}")
+        return 2
+    fn = EXTRACTORS.get(src.suffix.lower())
     if fn is None:
-        raise SystemExit(f"Formato {ext} no soportado directamente. "
-                         "Conviértelo a PDF o DOCX primero (ver docs/extractor.md, paso 0).")
-    md, rep = fn(a.archivo, a.salida)
+        print(f"Formato {src.suffix} no soportado directamente. "
+              "Conviértelo a PDF o DOCX primero (ver docs/extractor.md, paso 0).")
+        return 2
+    out_dir, action, why = plan(src, a.salida, a.forzar)
+    md = out_dir / f"{out_dir.name}.md"
+    if action == "omitir":
+        print(f"Sin cambios: {why}.\nMarkdown: {md}\nReporte:  {out_dir / 'reporte.md'}")
+        return 0
+    if action == "abortar":
+        print(f"No se extrajo: {why}.\nMarkdown existente: {md}\n"
+              "Usa --forzar para volver a extraer (el .md actual se guarda como respaldo).")
+        return 2
+    if action == "respaldar":
+        backup = md.with_name(f"{out_dir.name}.anterior.md")
+        backup.write_bytes(md.read_bytes())
+        print(f"Respaldo del .md anterior ({why}): {backup}")
+    md, rep = fn(src, out_dir)
+    (out_dir / "fuente.json").write_text(json.dumps({
+        "archivo": src.name, "sha256": sha256(src), "md_sha256": sha256(md),
+        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    }, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     print(f"Markdown: {md}\nReporte:  {rep}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

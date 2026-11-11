@@ -23,7 +23,7 @@ El resultado sirve como fuente para leer, resumir, consultar o **regenerar** el 
 | **Transcribir, no resumir.** | Un resumen pierde información; la meta es el 100%. |
 | **Eliminar solo lo redundante**: encabezados y pies repetidos, índice, puntos guía, espacios. | Lo eliminado se guarda una vez en un comentario, así no se pierde nada. |
 | **Escribir los resultados en archivos y mostrar solo resúmenes en la terminal.** | Lo que se imprime en la terminal también consume tokens. |
-| **No volver a extraer lo ya extraído.** Si `extracted/<nombre>/` existe y el original no cambió, reutilizarlo. | Evita trabajo y tokens repetidos. |
+| **No volver a extraer lo ya extraído.** Si `extracted/<nombre>/` existe y el original no cambió, reutilizarlo. | Evita trabajo y tokens repetidos. `extraer.py` lo aplica solo: si el original no cambió no hace nada, y si el `.md` fue editado a mano se niega a pisarlo. Con `--forzar` extrae de nuevo y guarda el anterior como `<nombre>.anterior.md`. |
 
 ---
 
@@ -35,6 +35,7 @@ extracted/<nombre>/      resultado de la extracción
     <nombre>.md          contenido completo en Markdown
     assets/              imágenes, recortes de gráficos y páginas escaneadas
     reporte.md           resumen: cobertura y pendientes
+    fuente.json          registro del original (nombre y huella); no se edita
 documentos/              versiones preparadas para generar (ver generator.md)
 output/                  PDFs generados
 tools/extraer.py         extractor
@@ -58,7 +59,7 @@ tools/comparar.py        verificación de cobertura
 | `.html` | Guardar como PDF desde el navegador (o `pandoc archivo.html -o archivo.docx`) y extraer ese archivo. | Igual que el formato convertido. |
 | Imagen (`.png`, `.jpg`) o PDF escaneado | Lectura visual: abrir la imagen y transcribir. No hay OCR (Tesseract) instalado. | Transcripción literal + descripción de lo visual. |
 
-Requisitos: `pip install pymupdf python-docx python-pptx openpyxl`.
+Requisitos: `pip install -r requirements.txt`.
 
 ---
 
@@ -92,6 +93,10 @@ observaciones"** y no hay figuras pendientes, la extracción está terminada.
 | **Posible tabla sin reconstruir** | Abrir el recorte `assets/p<N>-tabla<M>.png`. El texto ya está en el `.md` como párrafos sueltos: buscarlo y convertirlo en tabla Markdown. (Las tablas con bordes o con líneas horizontales se reconstruyen solas.) | Tabla Markdown en el mismo lugar. |
 | **Dos columnas: verificar orden** | Abrir esa página solo si el texto se lee desordenado en el `.md`. | Reordenar párrafos. |
 | **Cobertura < 100% con palabras faltantes** | Buscar esas palabras en el original con un script (no a ojo) y agregarlas en su lugar. | Texto agregado en su posición. |
+| **Faltan en ...** (Word, PowerPoint, Excel) | El reporte dice en qué parte del archivo está lo que no se extrajo: pies de página, notas al pie, cuadros de texto, SmartArt, comentarios. La cobertura se calcula contra el archivo real, no contra lo extraído. | Agregar ese texto en su lugar, o en un comentario si es un pie repetido. |
+| **Imágenes en el original: N \| extraídas: M** | Hay imágenes que no se guardaron (por ejemplo, las de un marcador de posición de PowerPoint). | Exportarlas con un script a `assets/` y referenciarlas. |
+| **Texto único en la zona de encabezado/pie, conservado en el cuerpo** | Suele ser una nota al pie: aparece una sola vez, así que no se trató como pie repetido. | Dejarlo donde corresponde (junto a su llamada) o borrarlo si de verdad era un pie. |
+| **Renglones de código reunidos** | El original partió renglones de código por falta de ancho y el extractor los unió. | Revisar una muestra: cada renglón debe ser una instrucción completa. |
 
 Para abrir imágenes, usar las de `assets/` (ya recortadas y en resolución moderada).
 Nunca renderizar todas las páginas.
@@ -157,5 +162,7 @@ información para quien lea el `.md`.
 | Palabras pegadas o cortadas con guion | Corte de línea del original. | El extractor une los cortes `pala-\nbra`; revisar casos con guion real. |
 | Un párrafo partido en dos | Continúa en la página siguiente. | Unirlo al preparar el documento (generator.md). |
 | Bloque de código dividido | Cambio de página en el original. | Unir los dos bloques al preparar el documento. |
+| Código sin sangría o con renglones partidos | El PDF da la sangría por posición y parte los renglones largos. | El extractor los reconstruye (sangría por posición, renglones reunidos). Sin recuadro de fondo ni texto normal en el documento no puede saber el ancho y no reúne nada. |
+| "No se extrajo: el .md fue editado a mano" | Ya hay una extracción con trabajo manual. | Seguir usando esa. Solo si el original cambió: `--forzar` y recuperar el trabajo desde `<nombre>.anterior.md`. |
 | Una tabla salió como párrafos | Su dibujo no se pudo interpretar. | El reporte la marca; reconstruirla con el recorte. |
 | "Formato no soportado" | Formato antiguo o poco común. | Convertir según el Paso 0. |
