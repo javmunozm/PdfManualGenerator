@@ -37,14 +37,15 @@ Lo que sí funciona: la ida y vuelta de `ejemplo.pdf` conserva 21 de 21 marcador
 99,5% de las palabras; las tablas de líneas horizontales se reconstruyen; los scripts
 escriben a archivos y muestran pocas líneas en la terminal.
 
-### 1.1 Estado (10/11/2026: fases 1 y 2 implementadas)
+### 1.1 Estado (10/11/2026: fases 1, 2 y 3 implementadas)
 
 | Estado | Puntos |
 |---|---|
-| **Resuelto**, con prueba en `tests/` | E1, E2, E3, E9, E16, G14, G15, C1, C2, C3, C4, K2 (hook H1 y H2), D5 (base de pruebas: 29) |
+| **Resuelto**, con prueba en `tests/` | E1, E2, E3, E7, E9, E16, G1, G6, G7, G14, G15, C1, C2, C3, C4, D1 (`preparar.py`, `validar.py` y la ida y vuelta del ejemplo), K2 (hook H1 y H2), D5 (41 pruebas) |
 | **Resuelto**, sin prueba automática | K1 (`CLAUDE.md`), D4 (git, `.gitignore`), D2 (`README.md`) |
-| **Parcial** | C5: mensaje claro para otros formatos; sigue sin compararlos ni comparar estructura. D3: `requirements.txt` y revisión visual sin `pypdfium2`; falta `tools/revisar.py`. K3: contexto de este proyecto en `.claude/settings.local.json`; la configuración global no se tocó. E8: `comparar.py` ya une las palabras cortadas; el reporte del extractor todavía no. |
-| **Pendiente** | Todo lo demás (fases 3 a 6) y T1. |
+| **Parcial** | G9: un título con `<` ya no rompe el índice; un enlace en un título sigue saliendo tal cual. G8: `validar.py` detecta esos casos antes de generar y `manual.py` avisa si no pudo interpretar una línea; falta `--estricto` en el generador. G13: `preparar.py` agrega el capítulo que falta; el generador todavía numera 0.1 si no se preparó. C5: mensaje claro para otros formatos; sigue sin compararlos ni comparar estructura. D3: `requirements.txt` y revisión visual sin `pypdfium2`; falta `tools/revisar.py`. K3: contexto de este proyecto en `.claude/settings.local.json`; la configuración global no se tocó. E8: `comparar.py` ya une las palabras cortadas; el reporte del extractor todavía no. |
+| **Resuelto** (sección 9) | Skills (9.2, más `costo` y `traducir-manual`), subagentes (9.4, más `traductor`) y T1 (`tools/comparar_traduccion.py`). Además `tools/costo.py` y `tools/capitulos.py`. Las herramientas tienen prueba; las skills y los subagentes solo se comprobaron en su formato, no en una tarea real. Ver `docs/pipeline.md`. |
+| **Pendiente** | Fases 4 y 6, y de la 5: hooks H3, H4 y H5, `tools/estado.py` y `tools/revisar.py`. |
 
 Notas sobre lo resuelto:
 
@@ -55,8 +56,12 @@ Notas sobre lo resuelto:
   probó con el manual real: requiere permiso para usar ese archivo de `sources/`.
 - **Los hooks** se probaron entregándoles llamadas simuladas. Para que queden activos
   hay que abrir `/hooks` una vez o reiniciar Claude Code.
-- Las demostraciones antiguas (`extracted/ejemplo/`, `output/ejemplo_regenerado.pdf`)
-  ya no se versionan; D1 sigue pendiente.
+- **D1**: la ida y vuelta del ejemplo pasa ahora por `preparar.py` y `validar.py`, y
+  `comparar.py` la aprueba sin excepciones. De los 6 cuadros, 5 se reconstruyen solos; el
+  sexto ("Antes de entregar") queda como pendiente porque su tipo no se puede deducir del
+  texto. Tampoco se deduce una cita simple (queda como párrafo en cursiva). Las carpetas de
+  la demostración son locales: no se versionan.
+- **Listas anidadas** (sección 6): siguen aplanándose; `validar.py` lo avisa.
 
 ---
 
@@ -176,8 +181,9 @@ Lo que el extractor escribe y el generador no reproduce. Todo probado.
 
 ## 9. Mejoras que hay que implementar
 
-Nada de esta sección existe todavía. Los hooks y las skills son diseño: hay que probarlos
-al implementarlos.
+De esta sección ya existen `tools/preparar.py`, `tools/validar.py`, `tests/`,
+`requirements.txt`, `CLAUDE.md` y los hooks H1 y H2 (ver 1.1). El resto es diseño: hay que
+probarlo al implementarlo.
 
 ### 9.1 Herramientas nuevas
 

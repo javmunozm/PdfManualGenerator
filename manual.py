@@ -117,7 +117,31 @@ def build_styles(primary):
 # ---------------------------------------------------------------------------
 # Formato en línea: **negrita**, *cursiva*, `código`, [enlace](url)
 # ---------------------------------------------------------------------------
-def inline(text, link_color="#1F4E79"):
+TAG = re.compile(r"<(/?)(b|i|u|link)\b[^>]*>")
+
+
+def balanced(markup):
+    """¿Las etiquetas de formato abren y cierran en orden?"""
+    stack = []
+    for m in TAG.finditer(markup):
+        if not m.group(1):
+            stack.append(m.group(2))
+        elif not stack or stack.pop() != m.group(2):
+            return False
+    return not stack
+
+
+def emphasis(text):
+    """Convierte ***x***, **x** y *x*. Devuelve (texto, correcto). Si las marcas quedan
+    cruzadas (**a *b** c*) no se convierte nada: se imprimen tal cual."""
+    out = re.sub(r"\*\*\*(?!\s)(.+?)(?<!\s)\*\*\*", r"<b><i>\1</i></b>", text)
+    out = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", out)
+    out = re.sub(r"(?<![\*\w])\*(?!\s)(.+?)(?<!\s)\*(?![\*\w])", r"<i>\1</i>", out)
+    return (out, True) if balanced(out) else (text, False)
+
+
+def inline(text, link_color="#1F4E79", br=False):
+    """Formato en línea. Con br=True (celdas de tabla), <br> es un salto de renglón."""
     codes = []
 
     def stash(m):
@@ -126,10 +150,13 @@ def inline(text, link_color="#1F4E79"):
 
     text = re.sub(r"`([^`]+)`", stash, text)
     text = escape(text)
-    text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
-    text = re.sub(r"(?<![\*\w])\*(?!\s)(.+?)(?<!\s)\*(?![\*\w])", r"<i>\1</i>", text)
-    text = re.sub(r"\[([^\]]+)\]\(((?:https?://|mailto:)[^)\s]+)\)",
-                  rf'<link href="\2" color="{link_color}"><u>\1</u></link>', text)
+    if br:
+        text = re.sub(r"&lt;br\s*/?&gt;", "<br/>", text, flags=re.I)
+    text, _ = emphasis(text)
+    linked = re.sub(r"\[([^\]]+)\]\(((?:https?://|mailto:)[^)\s]+)\)",
+                    rf'<link href="\2" color="{link_color}"><u>\1</u></link>', text)
+    if balanced(linked):
+        text = linked
     text = re.sub(
         "\x00(\\d+)\x00",
         lambda m: ('<font face="Courier" size="9.5" backColor="#EFEFEF">'
@@ -272,8 +299,36 @@ def parse_front_matter(text):
                     if ":" in raw and not raw.lstrip().startswith("#"):
                         k, v = raw.split(":", 1)
                         cfg[k.strip().lower()] = v.strip().strip('"').strip("'")
+                cfg["_body_line"] = i + 1         # líneas que ocupa la cabecera
                 return cfg, "\n".join(lines[i + 1:])
     return cfg, text
+
+
+def split_row(row):
+    """Celdas de una fila de tabla. Una barra escrita como \\| o dentro de `código` es
+    texto de la celda, no un separador."""
+    row = row.strip()
+    if row.startswith("|"):
+        row = row[1:]
+    if row.endswith("|") and not row.endswith("\\|"):
+        row = row[:-1]
+    cells, cur, in_code, i = [], "", False, 0
+    while i < len(row):
+        ch = row[i]
+        if ch == "\\" and row[i + 1:i + 2] == "|":
+            cur += "|"
+            i += 2
+            continue
+        if ch == "`":
+            in_code = not in_code
+        if ch == "|" and not in_code:
+            cells.append(cur.strip())
+            cur = ""
+        else:
+            cur += ch
+        i += 1
+    cells.append(cur.strip())
+    return cells
 
 
 class Builder:
@@ -289,9 +344,20 @@ class Builder:
         self.story = []
         self.first_h1 = True
         self.bm = 0
+        self.line = 0             # línea del .md que se está leyendo
+        self.first_line = 0       # líneas que ocupa la cabecera
+        self.warnings = []
+
+    def para(self, text, style, link=None, br=False):
+        """Párrafo con formato en línea. Si no se puede interpretar, se imprime literal."""
+        try:
+            return Paragraph(inline(text, link or self.link, br), style)
+        except ValueError:
+            self.warnings.append(f"l.{self.line}: formato en línea no reconocido; se imprimió tal cual")
+            return Paragraph(escape(text), style)
 
     def p(self, text, style="body"):
-        return Paragraph(inline(text, self.link), self.s[style])
+        return self.para(text, self.s[style])
 
     # --- títulos -----------------------------------------------------------
     def heading(self, level, text):
@@ -309,7 +375,7 @@ class Builder:
             self.first_h1 = False
         else:
             self.story.append(CondPageBreak(3 * cm))
-        para = Paragraph(inline(label, self.link), self.s[f"h{level}"])
+        para = self.para(label, self.s[f"h{level}"])
         self.bm += 1
         para._toc_level = lvl
         para._toc_text = re.sub(r"[`*]", "", label.replace("  ", " "))
@@ -320,14 +386,14 @@ class Builder:
 
     # --- bloques -----------------------------------------------------------
     def table(self, rows):
-        cells = [[c.strip() for c in r.strip().strip("|").split("|")] for r in rows]
+        cells = [split_row(r) for r in rows]
         cells = [r for r in cells if not all(re.fullmatch(r":?-{2,}:?", c) for c in r)]
         if not cells:
             return
         ncols = max(len(r) for r in cells)
         cells = [r + [""] * (ncols - len(r)) for r in cells]
-        data = [[Paragraph(inline(c, "#FFFFFF"), self.s["cell_head"]) for c in cells[0]]]
-        data += [[Paragraph(inline(c, self.link), self.s["cell"]) for c in r] for r in cells[1:]]
+        data = [[self.para(c, self.s["cell_head"], "#FFFFFF", br=True) for c in cells[0]]]
+        data += [[self.para(c, self.s["cell"], br=True) for c in r] for r in cells[1:]]
         t = Table(data, colWidths=[self.fw / ncols] * ncols, repeatRows=1, hAlign="LEFT")
         style = [
             ("BACKGROUND", (0, 0), (-1, 0), self.primary),
@@ -369,7 +435,7 @@ class Builder:
         if title:
             ts = ParagraphStyle("ct", parent=self.s["callout_title"],
                                 textColor=colors.HexColor(border))
-            content.append(Paragraph(inline(title, self.link), ts))
+            content.append(self.para(title, ts))
         for para in "\n".join(body_lines).split("\n\n"):
             para = " ".join(x.strip() for x in para.splitlines()).strip()
             if para:
@@ -412,6 +478,8 @@ class Builder:
         while i < len(lines):
             line = lines[i]
             st = line.strip()
+            if not para:
+                self.line = i + 1 + self.first_line
 
             if not st:
                 flush(); i += 1; continue
@@ -519,7 +587,7 @@ class ManualDoc(BaseDocTemplate):
         self._last_level = level
         self.canv.bookmarkPage(f._bm_key)
         self.canv.addOutlineEntry(f._toc_text, f._bm_key, level=level, closed=level > 0)
-        self.notify("TOCEntry", (level, f._toc_text, self.page, f._bm_key))
+        self.notify("TOCEntry", (level, escape(f._toc_text), self.page, f._bm_key))
         if level == 0:
             self.page_chapters[self.page] = f._toc_text
 
@@ -642,7 +710,7 @@ def make_canvas(doc):
 # ---------------------------------------------------------------------------
 def build_pdf(md_path, out_path):
     md_path = Path(md_path)
-    cfg, body = parse_front_matter(md_path.read_text(encoding="utf-8"))
+    cfg, body = parse_front_matter(md_path.read_text(encoding="utf-8-sig"))  # con o sin BOM
     cfg["_base"] = str(md_path.parent)
     size = LETTER if cfg["tamano"].lower() in ("carta", "letter") else A4
 
@@ -657,6 +725,7 @@ def build_pdf(md_path, out_path):
     styles = build_styles(doc.primary)
     # El marco tiene 6 pt de relleno por lado
     builder = Builder(cfg, styles, md_path.parent, doc.width - 12, doc.height - 12)
+    builder.first_line = cfg.get("_body_line", 0)
 
     story = [Spacer(1, 1), NextPageTemplate("contenido"), PageBreak()]
     if cfg["indice"].lower() in ("si", "sí", "yes", "true", "1"):
@@ -666,6 +735,8 @@ def build_pdf(md_path, out_path):
     story += builder.build(body)
 
     doc.multiBuild(story, canvasmaker=make_canvas(doc))
+    for w in builder.warnings:
+        print(f"Aviso {w}", file=sys.stderr)
     return out_path
 
 

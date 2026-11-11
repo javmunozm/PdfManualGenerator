@@ -181,6 +181,175 @@ class Generador(Caso):
         self.assertEqual(run("tools/comparar.py", md, pdf, "--estricto")[0], 0)
 
 
+    def test_G1_negrita_y_cursiva_juntas(self):
+        _, pdf = self.generar("bi", "# T\n\nEsto es ***muy importante*** aqui.\n")
+        with pymupdf.open(pdf) as doc:
+            self.assertIn("Esto es muy importante aqui.", doc[2].get_text())
+
+    def test_G1_marcas_cruzadas_se_imprimen_tal_cual(self):
+        _, pdf = self.generar("cruzado", "# T\n\nEsto **a *b** c* fin.\n")
+        with pymupdf.open(pdf) as doc:
+            self.assertIn("Esto **a *b** c* fin.", doc[2].get_text())
+
+    def test_G6_barra_y_salto_dentro_de_una_celda(self):
+        md, pdf = self.generar("tabla", "# T\n\n| Expr | Nota |\n|---|---|\n"
+                               "| a \\| b | linea1<br>linea2 |\n| `x|y` | ok |\n")
+        with pymupdf.open(pdf) as doc:
+            renglones = [ln.strip() for ln in doc[2].get_text().splitlines()]
+        for esperado in ("a | b", "linea1", "linea2", "x|y", "ok"):
+            self.assertIn(esperado, renglones)
+        self.assertNotIn("<br>", " ".join(renglones))
+        self.assertEqual(run("tools/comparar.py", md, pdf, "--estricto")[0], 0)
+
+    def test_G7_archivo_con_bom_conserva_la_cabecera(self):
+        md = self.tmp / "bom.md"
+        md.write_bytes(("\ufeff---\ntitulo: Con BOM\nautor: Ada\n---\n\n# Uno\n\nTexto.\n").encode("utf-8"))
+        pdf = self.tmp / "bom.pdf"
+        self.assertEqual(run("manual.py", md, "-o", pdf)[0], 0)
+        with pymupdf.open(pdf) as doc:
+            self.assertIn("Con BOM", doc[0].get_text())
+
+    def test_G9_titulo_con_signos_de_etiqueta_no_rompe_el_indice(self):
+        _, pdf = self.generar("angulos", "# Etiqueta <b> y a < b\n\nTexto.\n")
+        with pymupdf.open(pdf) as doc:
+            self.assertEqual(doc.get_toc()[0][1], "Etiqueta <b> y a < b")
+
+
+# ---------------------------------------------------------------------------
+class Validar(Caso):
+    def test_documento_limpio(self):
+        rc, out = run("tools/validar.py", RAIZ / "ejemplo.md", "--estricto")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("0 errores, 0 avisos", out)
+
+    def test_errores(self):
+        md = self.md("malo", "# Uno\n\nAgua H\u2082O.\n\n![FIGURA: describir](assets/no.png)\n\n"
+                             "<!-- nota --> texto perdido\n\n```\nsin cerrar\n",
+                     cabecera="---\ntitulo: P\ncolor: azul\n---\n\n")
+        rc, out = run("tools/validar.py", md, "--max", "30")
+        self.assertEqual(rc, 1, out)
+        for esperado in ("color «azul»", "sin glifo", "figura sin describir", "imagen no encontrada",
+                         "después de -->", "sin cerrar"):
+            self.assertIn(esperado, out)
+
+    def test_avisos_no_fallan_salvo_en_estricto(self):
+        md = self.md("avisos", "## Sin capitulo\n\n#### Nivel 4\n\nTexto _asi_ y **a *b** c*.\n\n"
+                               "1. Uno\n\n2. Dos\n\n- a\n  - b\n\n---\n",
+                     cabecera="---\ntitulo: P\n---\n\n")
+        rc, out = run("tools/validar.py", md, "--max", "30")
+        self.assertEqual(rc, 0, out)
+        for esperado in ("0.1", "nivel 4", "guion bajo", "mal cerrada", "empieza en 2",
+                         "lista anidada", "línea horizontal"):
+            self.assertIn(esperado, out)
+        self.assertEqual(run("tools/validar.py", md, "--estricto")[0], 1)
+
+
+EXTRAIDO = """---
+titulo: Manual de prueba
+fuente: manual.pdf
+curso: QUI-101
+---
+
+<!-- p.1 PORTADA ORIGINAL: FACULTAD DE CIENCIAS | Manual de prueba | Guia de laboratorio | CURSO | QUI-101 -->
+
+<!-- p.2 -->
+
+# 1. Uso
+
+Este parrafo empieza en una pagina y
+
+<!-- p.3 -->
+
+termina en la siguiente.
+
+```
+linea uno
+```
+
+<!-- p.4 -->
+
+```
+linea dos
+```
+
+1. Primer paso.
+
+<!-- p.5 -->
+
+2. Segundo paso.
+
+**Nota**
+
+Texto de la nota.
+
+**Warning**
+
+Do not open the lid.
+
+**Antes de empezar**
+
+Leer todo.
+
+Consulta la norma vigente, por favor. Ver [el sitio.](https://ejemplo.org/sitio)
+
+Enlaces: [la norma vigente,](https://ejemplo.org/norma)
+"""
+
+
+class Preparar(Caso):
+    def preparar(self, texto, *extra, nombre="manual"):
+        carpeta = self.tmp / "ext" / nombre
+        (carpeta / "assets").mkdir(parents=True, exist_ok=True)
+        (carpeta / "assets" / "fig.png").write_bytes(b"png")
+        (carpeta / f"{nombre}.md").write_text(texto, encoding="utf-8")
+        rc, out = run("tools/preparar.py", carpeta, "--salida", self.tmp / "doc", *extra)
+        return rc, out, self.tmp / "doc" / nombre / f"{nombre}.md"
+
+    def test_ajustes_automaticos(self):
+        rc, out, md = self.preparar(EXTRAIDO)
+        self.assertEqual(rc, 1, out)                                    # queda un rótulo por decidir
+        t = md.read_text(encoding="utf-8")
+        self.assertIn("empieza en una pagina y termina en la siguiente.", t)
+        self.assertIn("```\nlinea uno\nlinea dos\n```", t)
+        self.assertIn("1. Primer paso.\n2. Segundo paso.", t)
+        self.assertIn("> [!NOTA]\n> Texto de la nota.", t)
+        self.assertIn("> [!ADVERTENCIA] Warning\n> Do not open the lid.", t)
+        self.assertIn("**Antes de empezar**", t)                        # no se adivina el tipo
+        self.assertIn("Antes de empezar", out)
+        self.assertIn("institucion: FACULTAD DE CIENCIAS", t)
+        self.assertIn("subtitulo: Guia de laboratorio", t)
+        self.assertIn("Consulta [la norma vigente](https://ejemplo.org/norma), por favor.", t)
+        self.assertIn("[el sitio](https://ejemplo.org/sitio).", t)
+        self.assertNotIn("Enlaces:", t)
+        self.assertTrue((md.parent / "assets" / "fig.png").is_file())
+
+    def test_no_pisa_un_documento_ya_preparado(self):
+        rc, out, md = self.preparar("---\ntitulo: P\n---\n\n# Uno\n\nTexto.\n")
+        self.assertEqual(rc, 0, out)
+        md.write_text(md.read_text(encoding="utf-8") + "\nTrabajo manual.\n", encoding="utf-8")
+        rc, out, _ = self.preparar("---\ntitulo: P\n---\n\n# Uno\n\nTexto.\n")
+        self.assertEqual(rc, 2, out)
+        self.assertIn("Trabajo manual.", md.read_text(encoding="utf-8"))
+        rc, out, _ = self.preparar("---\ntitulo: P\n---\n\n# Uno\n\nTexto.\n", "--forzar")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Trabajo manual.", md.with_name("manual.anterior.md").read_text(encoding="utf-8"))
+
+    def test_presentacion_sin_capitulos_recibe_uno(self):
+        rc, out, md = self.preparar("---\ntitulo: Clase 1\n---\n\n## Diapositiva 1: Hola\n\n- a\n\n"
+                                    "## Diapositiva 2\n\n- b\n", nombre="clase")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("# Clase 1\n\n## Diapositiva 1: Hola", md.read_text(encoding="utf-8"))
+        pdf = self.tmp / "clase.pdf"
+        self.assertEqual(run("manual.py", md, "-o", pdf)[0], 0)
+        with pymupdf.open(pdf) as doc:
+            self.assertEqual(doc.get_toc()[1][1], "1.1 Diapositiva 1: Hola")
+
+    def test_pendientes_de_la_extraccion_se_avisan(self):
+        rc, out, _ = self.preparar("---\ntitulo: P\n---\n\n# Uno\n\n![FIGURA: describir](assets/fig.png)\n")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("figuras sin describir", out)
+
+
 # ---------------------------------------------------------------------------
 def pdf_con_pie_y_nota(ruta):
     c = canvas.Canvas(str(ruta), pagesize=A4)
@@ -369,10 +538,19 @@ class Extractor(Caso):
         self.assertIn("Títulos detectados: 21 | Marcadores del PDF: 21", reporte)
         md = self.leer(carpeta)
         self.assertIn('    """Calcula el promedio de una lista de notas."""', md)
+        rc, out = run("tools/preparar.py", carpeta, "--salida", self.tmp / "doc")
+        self.assertEqual(rc, 1, out)                                    # queda un rótulo por decidir
+        self.assertIn("Antes de entregar", out)
+        listo = self.tmp / "doc" / "ejemplo" / "ejemplo.md"
+        texto = listo.read_text(encoding="utf-8")
+        self.assertIn("institucion: MATERIAL DE CLASE", texto)
+        self.assertEqual(len(re.findall(r"^> \[!", texto, re.M)), 5)    # 5 de los 6 cuadros
+        self.assertIn("version: 2.0\nfecha: 10/11/2026", texto)        # bloque partido por página
+        self.assertEqual(run("tools/validar.py", listo)[0], 0)
         regenerado = self.tmp / "regenerado.pdf"
-        self.assertEqual(run("manual.py", carpeta / "ejemplo.md", "-o", regenerado)[0], 0)
-        rc, out = run("tools/comparar.py", pdf, regenerado, "--ignorar", "MATERIAL DE CLASE")
-        self.assertEqual(rc, 0, out)                                    # falta conocida: E14
+        self.assertEqual(run("manual.py", listo, "-o", regenerado)[0], 0)
+        rc, out = run("tools/comparar.py", pdf, regenerado)
+        self.assertEqual(rc, 0, out)
 
 
 if __name__ == "__main__":

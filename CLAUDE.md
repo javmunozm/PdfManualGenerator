@@ -3,7 +3,7 @@
 Extrae documentos a Markdown y genera manuales PDF con formato uniforme.
 
 ```
-sources/ --tools/extraer.py--> extracted/ --preparar--> documentos/ --manual.py--> output/
+sources/ --extraer.py--> extracted/ --preparar.py--> documentos/ --validar.py, manual.py--> output/
 ```
 
 ## Reglas (obligatorias)
@@ -29,12 +29,24 @@ sources/ --tools/extraer.py--> extracted/ --preparar--> documentos/ --manual.py-
 
 ```
 python tools/extraer.py sources/<archivo>             # -> extracted/<nombre>/
+python tools/preparar.py extracted/<nombre>           # -> documentos/<nombre>/ + pendientes
+python tools/validar.py documentos/<n>/<n>.md         # antes de generar; 0 = sin errores
 python manual.py documentos/<n>/<n>.md -o output/<n>.pdf
 python tools/comparar.py <origen> output/<n>.pdf      # código 0 = correcto, 1 = falla
 python -m unittest discover tests                     # pruebas (no usan sources/)
 ```
 
+## Skills
+
+Usar la skill del caso en vez de armar los pasos de memoria: `/costo` antes de un
+documento largo, `/regenerar-manual`, `/traducir-manual`, `/nuevo-manual`,
+`/actualizar-manual`, `/verificar-pdf`. `/extraer` solo la invoca el usuario.
+Las imágenes y la traducción van siempre a subagentes (`describir-figuras`,
+`traductor`, `revisor-visual`): no entran a la conversación principal.
+
 ## Guías
+
+- `docs/pipeline.md`: flujo completo, bibliotecas, skills y control de costo.
 
 - `docs/extractor.md`: cómo extraer y resolver pendientes.
 - `docs/generator.md`: cómo crear, regenerar o actualizar un documento; sintaxis.

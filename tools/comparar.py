@@ -90,9 +90,10 @@ def md_lines(text):
         elif re.fullmatch(r"!\[([^\]]*)\]\(([^)]+)\)", st):
             out.append((re.fullmatch(r"!\[([^\]]*)\]\(([^)]+)\)", st).group(1), where))
         elif st.startswith("|"):
-            cells = [c.strip() for c in st.strip("|").split("|")]
+            cells = [c.strip() for c in re.split(r"(?<!\\)\|", st.strip("|"))]
             if not all(re.fullmatch(r":?-{2,}:?", c) for c in cells):
-                out.append((LINK.sub(r"\1", " ".join(cells)), where))
+                row = re.sub(r"<br\s*/?>", " ", " ".join(cells), flags=re.I)   # salto en la celda
+                out.append((LINK.sub(r"\1", row), where))
         elif quote:
             q = re.sub(r"^\s*>\s?", "", lines[i])
             m = None if in_quote else re.match(r"\[!(\w+)\]\s*(.*)", q.strip())

@@ -37,6 +37,7 @@ La terminal muestra la ruta y el peso del PDF. Requisitos: `pip install -r requi
 ## 3. Caso A: documento nuevo
 
 1. Copiar la estructura de `ejemplo.md` (cabecera + capítulos) a `documentos/<nombre>/<nombre>.md`.
+   Antes de generar, pasar `python tools/validar.py` sobre el archivo.
 2. Completar la cabecera (sección 6).
 3. Ordenar el contenido en capítulos (`#`), secciones (`##`) y subsecciones (`###`).
    Cada capítulo empieza en página nueva, así que conviene que tengan un tamaño parecido.
@@ -53,34 +54,61 @@ La terminal muestra la ruta y el peso del PDF. Requisitos: `pip install -r requi
 
 Seguir [extractor.md](extractor.md) hasta completar su Paso 4 (100% verificado).
 
-### Paso 2: copiar a `documentos/`
+### Paso 2: preparar
 
 ```
-documentos/<nombre>/<nombre>.md      copia de extracted/<nombre>/<nombre>.md
-documentos/<nombre>/assets/          copia de extracted/<nombre>/assets/
+python tools/preparar.py extracted/<nombre>
 ```
 
-`extracted/` queda como registro fiel del original; los ajustes se hacen en la copia.
+Crea `documentos/<nombre>/<nombre>.md` y copia `assets/`. `extracted/` queda como registro
+fiel del original; los ajustes se hacen en la copia. Si el documento ya existe no lo
+reemplaza (es la fuente del PDF); con `--forzar` lo rehace y guarda el anterior como
+`<nombre>.anterior.md`.
 
-### Paso 3: preparar el `.md` (lista de ajustes)
+`preparar.py` hace solo lo que no requiere criterio y termina con una lista corta de
+pendientes (código 1) o sin pendientes (código 0):
 
-Hacer solo los ajustes que correspondan, con ediciones puntuales:
-
-| En el `.md` extraído | Ajuste |
+| En el `.md` extraído | Quién lo ajusta |
 |---|---|
-| `<!-- p.1 PORTADA ORIGINAL: ... -->` | Pasar los datos que falten a la cabecera: `institucion`, `subtitulo`, `curso`, `version`, `fecha`. Dejar el comentario. |
-| `<!-- p.2 ÍNDICE ORIGINAL: ... -->` | Nada: el índice se regenera solo. Sirve para comprobar que estén todos los títulos. |
-| `<!-- ENCABEZADOS/PIES ... -->` y `<!-- p.N -->` | Nada: no se imprimen. |
+| Párrafo, lista, bloque de código o tabla partidos por `<!-- p.N -->` | **Automático.** Los une; el marcador queda después. Una tabla solo se une si repite el mismo encabezado; si no, queda como pendiente. |
+| `**Nota**`, `**Consejo**`, `**Advertencia**`, `**Importante**`, `**Ejercicio 1**` (o en inglés: Note, Tip, Warning, Important, Exercise) seguido de un párrafo | **Automático.** Cuadro `> [!NOTA]`; si el rótulo no es el nombre del tipo, queda como título (`> [!ADVERTENCIA] Warning`). Solo toma el párrafo siguiente. |
+| Otro rótulo en negrita solo en su línea (`**Antes de entregar**`) | **Pendiente.** No se puede saber el tipo: escribir `> [!IMPORTANTE] Antes de entregar` y el texto con `> `. |
+| `<!-- p.1 PORTADA ORIGINAL: ... -->` | **Automático** para `institucion` (lo primero de la portada) y `subtitulo` (lo que sigue al título). Lo que no pudo ubicar queda como pendiente. El comentario se conserva. |
+| `[texto.](url)` con la puntuación dentro | **Automático.** Queda `[texto](url).` |
+| `Enlaces: [texto](url)` al final de una página | **Automático** si el texto aparece una sola vez en esa página. Si no, pendiente. |
+| Documento sin ningún capítulo `#` (PowerPoint, Excel) | **Automático.** Agrega `# <titulo>` para que la numeración no empiece en 0.1. Agrupar las diapositivas en capítulos reales es **manual**. |
+| `![FIGURA: describir](...)`, `TRANSCRIBIR` | **Pendiente.** Se resuelve en `extracted/` (extractor.md, paso 3) y se prepara de nuevo con `--forzar`. |
+
+### Paso 3: ajustes a mano y validación
+
+Con ediciones puntuales sobre `documentos/<nombre>/<nombre>.md`:
+
+| En el `.md` | Ajuste |
+|---|---|
+| Lo que `preparar.py` dejó como pendiente | Resolverlo. |
+| `<!-- p.2 ÍNDICE ORIGINAL: ... -->`, `<!-- ENCABEZADOS/PIES ... -->`, `<!-- p.N -->` | Nada: no se imprimen. El índice se regenera solo. |
 | Títulos ya numerados (`# 1. Introducción`) | Dejar `numerar: no`. O bien quitar los números y poner `numerar: si`. No mezclar. |
-| Párrafo cortado entre `<!-- p.N -->` | Unir las dos partes en un solo párrafo. |
-| Dos bloques de código seguidos (cortados por página) | Unirlos en uno. |
 | Filas de tabla como párrafos sueltos (reporte: "posible tabla sin reconstruir") | Convertirlas en tabla Markdown. |
-| `**Nota**` (o Consejo, Advertencia, Importante, Ejercicio) seguido de un párrafo | Convertir en cuadro: `> [!NOTA]` + `> texto`. Con título propio: `> [!IMPORTANTE] Antes de entregar`. |
+| Un párrafo todo en cursiva que en el original era una cita | Escribirlo como `> texto`. |
 | `![pie](assets/...)` | Dejar la ruta (es relativa al `.md`). Revisar que el pie sea corto. |
 | `<!-- DESCRIPCIÓN: ... -->` o `<!-- DATOS DEL GRÁFICO: ... -->` | Dejar. Si los datos aportan al lector, agregarlos también como tabla visible. |
-| `Enlaces: [texto](url)` al final de una página | Mover cada enlace a su frase. |
-| Diapositivas (`## Diapositiva N: ...`) | Agrupar diapositivas en capítulos con `#`; las viñetas pasan a párrafos o listas. Las notas del orador pasan a párrafos o a `> [!NOTA]`. |
+| Diapositivas (`## Diapositiva N: ...`) | Agrupar en capítulos con `#`; las viñetas pasan a párrafos o listas. Las notas del orador pasan a párrafos o a `> [!NOTA]`. |
 | Hojas de Excel / JSON | Dejar tablas cortas; para tablas largas, conservar solo las columnas necesarias e indicarlo, o dividir en varias tablas con un subtítulo cada una. |
+
+Después, antes de generar:
+
+```
+python tools/validar.py documentos/<nombre>/<nombre>.md
+```
+
+Revisa el `.md` sin generar el PDF y muestra, con número de línea:
+
+- **error** (código 1): se perdería contenido o quedaría trabajo sin terminar. Imagen
+  inexistente, figura sin describir, bloque de código o comentario sin cerrar, texto
+  después de `-->`, caracteres que saldrían como ■, `color` o `dpi_imagenes` inválidos.
+- **aviso** (código 0; con `--estricto`, 1): sintaxis que no se admite y se imprimiría tal
+  cual. Títulos de nivel 4, listas anidadas, listas numeradas que no empiezan en 1,
+  negrita mal cerrada, guion bajo, etiquetas HTML, enlaces internos, líneas `---`.
 
 ### Paso 4: generar y verificar
 
@@ -130,7 +158,7 @@ Los manuales de programación, ingeniería, física y matemática se trabajan en
    puntuales; no reescribir el archivo entero).
 2. Subir `version` (1.0 → 1.1 para correcciones, 2.0 para cambios grandes) y actualizar
    `fecha` (o borrarla para usar la de hoy).
-3. Generar con el mismo comando.
+3. Validar (`tools/validar.py`) y generar con el mismo comando.
 4. Verificar con el `.md` como origen:
 
 ```
@@ -204,16 +232,17 @@ simples, filas repetidas o un párrafo "Notas" al final de la sección.
 
 ## 8. Verificación final
 
-- [ ] `manual.py` terminó sin errores y el peso es razonable (texto: decenas de KB; con imágenes, según `dpi_imagenes`).
+- [ ] `validar.py` no muestra errores.
+- [ ] `manual.py` terminó sin errores ni avisos y el peso es razonable (texto: decenas de KB; con imágenes, según `dpi_imagenes`).
 - [ ] `comparar.py` termina en `RESULTADO: CORRECTO` (código 0).
 - [ ] Revisión visual **mínima**: renderizar solo la portada, el índice y 1-2 páginas con tablas o
       figuras, varias por imagen y a escala baja. No revisar todas las páginas una por una.
 
 ```
-python -c "import pymupdf,tempfile,os; s=pymupdf.open('output/X.pdf'); n=min(4,len(s)); r=s[0].rect; \
+python -c "import pymupdf; s=pymupdf.open('output/X.pdf'); n=min(4,len(s)); r=s[0].rect; \
 o=pymupdf.open(); p=o.new_page(width=r.width*n,height=r.height); \
 [p.show_pdf_page(pymupdf.Rect(i*r.width,0,(i+1)*r.width,r.height),s,i) for i in range(n)]; \
-f=os.path.join(tempfile.gettempdir(),'revision.png'); p.get_pixmap(dpi=58).save(f); print(f)"
+p.get_pixmap(dpi=58).save('output/revision.png')"
 ```
 
 - [ ] El índice tiene todos los títulos y los marcadores funcionan.
@@ -235,7 +264,11 @@ f=os.path.join(tempfile.gettempdir(),'revision.png'); p.get_pixmap(dpi=58).save(
 | Problema | Solución |
 |---|---|
 | Un título no aparece en el índice | Falta el espacio después de `#`, o el título está dentro de un cuadro o de una tabla. |
-| Tildes o ñ con símbolos raros | Guardar el `.md` en UTF-8. |
+| Tildes o ñ con símbolos raros | Guardar el `.md` en UTF-8 (con o sin BOM). |
+| Un carácter sale como ■ | No existe en las fuentes del PDF (subíndices como ₂, emoji, otros alfabetos). `validar.py` los lista; reemplazarlos (`H2O`) hasta que se agregue una fuente Unicode. |
+| Asteriscos impresos (`**a *b** c*`) | Negrita y cursiva cruzadas: cerrar una antes de abrir la otra. `***texto***` sí funciona. |
+| Una barra parte la celda de una tabla | Escribirla como `\|` o dentro de `` `código` ``. Para un salto de renglón dentro de la celda: `<br>`. |
+| "Aviso l.N" al generar | El formato de esa línea no se pudo interpretar y se imprimió tal cual: corregirlo en el `.md`. |
 | `[Imagen no encontrada: ...]` en el PDF | La ruta es relativa al `.md`; revisar mayúsculas y carpeta. |
 | Números dobles en títulos ("1. 1. Introducción") | Títulos ya numerados con `numerar: si`: usar `numerar: no` o quitar los números. |
 | PDF muy pesado | Bajar `dpi_imagenes` o recortar imágenes. |
