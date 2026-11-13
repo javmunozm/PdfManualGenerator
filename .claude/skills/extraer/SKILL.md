@@ -26,7 +26,9 @@ archivos de `sources/`. Si el archivo no existe, decirlo y parar.
    - "Renglones de código reunidos: N": revisar **todos** con la lista del final del
      reporte (no una muestra). Si lo unido es otra instrucción (otra variable, otra
      sentencia, texto detrás de un comentario), separarlo en el `.md` con su sangría.
-     En un manual real las 52 uniones fueron falsas (auditoría, E17).
+   - "Renglones de código que podrían estar partidos y no se unieron: N": quedaron como
+     en el original. Leer la lista; unir a mano solo los que continúan la misma
+     instrucción (un texto o un comando cortado a la mitad). Si ninguno, no hacer nada.
    - "Símbolos sin mapa de caracteres": son NUL en el `.md`. Reemplazarlos aquí por el
      símbolo que se ve en el original (una casilla es `[ ]`); con NUL el subagente
      `traductor` no puede guardar esa parte.

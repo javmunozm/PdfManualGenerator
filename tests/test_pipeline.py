@@ -425,27 +425,35 @@ CODIGO = '''RAG_PROMPT = ChatPromptTemplate.from_messages(
 )'''
 
 
+ANCHO_RECUADRO = int((525 - 70 - 2 * 8) / (0.6 * 11))      # letras por renglón: 66
+
+
 def pdf_con_codigo_partido(ruta):
     """Como un manual real: recuadro de código con letra grande, renglones partidos por
     ancho que siguen en el borde izquierdo, sangría por posición y un pie de dos líneas
     lejos del borde de la página."""
+    filas = []
+    for linea in CODIGO.splitlines():
+        sangria = len(linea) - len(linea.lstrip())
+        resto, primera = linea.strip(), True
+        while resto:
+            tope = ANCHO_RECUADRO - (sangria if primera else 0)
+            corte = len(resto) if len(resto) <= tope else resto.rfind(" ", 0, tope + 1)
+            filas.append((sangria if primera else 0, resto[:corte]))
+            resto, primera = resto[corte:].strip(), False
+    pdf_con_recuadro_de_codigo(ruta, filas)
+
+
+def pdf_con_recuadro_de_codigo(ruta, filas):
+    """Cuatro páginas; en la 2, un recuadro gris con `filas` = [(sangría, texto)] en
+    Courier 11, con la sangría dada por posición."""
     c = canvas.Canvas(str(ruta), pagesize=A4)
     size, x0, x1, pad = 11, 70, 525, 8
     cw = 0.6 * size
-    ancho = int((x1 - x0 - 2 * pad) / cw)
     for n in range(1, 5):
         c.setFont("Helvetica", 11)
         c.drawString(70, H - 90, f"Explicacion de la pagina {n} con un texto normal de relleno suficiente.")
         if n == 2:
-            filas = []
-            for linea in CODIGO.splitlines():
-                sangria = len(linea) - len(linea.lstrip())
-                resto, primera = linea.strip(), True
-                while resto:
-                    tope = ancho - (sangria if primera else 0)
-                    corte = len(resto) if len(resto) <= tope else resto.rfind(" ", 0, tope + 1)
-                    filas.append((sangria if primera else 0, resto[:corte]))
-                    resto, primera = resto[corte:].strip(), False
             alto = len(filas) * 14 + 2 * pad
             c.setFillGray(0.95)
             c.rect(x0, H - 120 - alto, x1 - x0, alto, fill=1, stroke=0)
@@ -583,6 +591,33 @@ class Extractor(Caso):
         total = int(re.search(r"Renglones de código reunidos \([^)]*\): (\d+)", reporte).group(1))
         lista = reporte.split("## Renglones de código reunidos")[1]
         self.assertEqual(len(re.findall(r"^- p\.2: `…", lista, flags=re.M)), total)
+
+    def test_E17_instrucciones_distintas_no_se_unen_aunque_no_quepan_juntas(self):
+        # Casos reales: en todos, la primera palabra del segundo renglón no cabe al final
+        # del primero, pero son renglones del autor y deben quedar separados.
+        filas = [
+            (0, "# Usa solo letras y numeros: van dentro de MONGO_URI"),         # comentario...
+            (0, "MONGO_ROOT_USER=root_de_prueba_para_el_manual"),                 # ...y variable
+            (0, "MONGO_URI=mongodb://app:clave@localhost:27017/base?authSource=base"),
+            (0, "SESSION_SECRET=reemplaza-esto-por-64-caracteres"),               # otra variable
+            (4, "const dto = await service.create(body, currentUser(req))"),
+            (4, "res.status(201).location(`/api/users/${dto.id}`).json(dto)"),    # misma sangría
+            (6, 'className="rounded-full bg-amber-100 px-2 text-xs font-bold'),
+            (8, 'text-amber-700-con-un-nombre-de-clase-largo">'),                 # sangría propia
+        ]
+        for (s1, a), (_, b) in zip(filas[::2], filas[1::2]):                      # no cabían juntos
+            self.assertGreater(s1 + len(a) + 1 + len(b.split(" ")[0]), ANCHO_RECUADRO)
+        pdf = self.tmp / "manual.pdf"
+        pdf_con_recuadro_de_codigo(pdf, filas)
+        rc, out, carpeta = self.extraer(pdf)
+        self.assertEqual(rc, 0, out)
+        codigo = "\n".join(" " * s + t for s, t in filas)
+        self.assertIn("```\n" + codigo + "\n```", self.leer(carpeta))
+        reporte = self.leer(carpeta, "reporte.md")
+        self.assertNotIn("## Renglones de código reunidos", reporte)
+        dudosos = reporte.split("## Renglones de código que podrían estar partidos")[1]
+        # los cuatro pares de arriba, más los vecinos que tampoco cabían juntos
+        self.assertGreaterEqual(len(re.findall(r"^- p\.2: `…", dudosos, flags=re.M)), 4)
 
     def test_ejemplo_ida_y_vuelta(self):
         pdf = self.tmp / "ejemplo.pdf"

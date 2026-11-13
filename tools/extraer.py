@@ -223,18 +223,38 @@ def save_pixmap(pix, path):
 # ---------------------------------------------------------------------------
 # Bloques de código
 # ---------------------------------------------------------------------------
-def rebuild_code(lines, right, log=None):
+CODE_COMMENT = re.compile(r"\s*(#|//|/\*|\*|--|<!--|rem\b)", re.I)
+
+
+def unfinished(line):
+    """¿Un renglón de código quedó a medias? Comillas sin cerrar, más paréntesis abiertos
+    que cerrados, o termina en una coma o un operador. Un comentario nunca cuenta: lo que
+    sigue puede ser código, y unirlo lo dejaría dentro del comentario."""
+    if CODE_COMMENT.match(line):
+        return False
+    s = re.sub(r"(?<=\w)'(?=\w)", "", line.rstrip())      # apóstrofos dentro de una palabra
+    if s.count('"') % 2 or s.count("'") % 2:
+        return True
+    if sum(s.count(c) for c in "([{") > sum(s.count(c) for c in ")]}"):
+        return True
+    return s.endswith((",", "&&", "||", "|", "+", "="))
+
+
+def rebuild_code(lines, right, log=None, skipped=None):
     """Reconstruye el código tal como se escribió. Devuelve (texto, renglones reunidos).
-    Si se pasa `log` (una lista), anota cada reunión como (final del renglón, renglón
-    que se le unió) para que el reporte las liste: la regla puede unir de más (E17).
+    Si se pasan `log` y `skipped` (listas), anota como (final del renglón, renglón
+    siguiente) cada reunión y cada caso dudoso que no se unió, para el reporte.
 
     `lines` son renglones (texto, x0, x1, y0, y1, tamaño de letra).
     - Sangría: si el PDF la da por posición (sin espacios), se calcula con el ancho de letra.
     - Renglones vacíos: solo donde hay una separación vertical real.
     - Renglones partidos: cuando el original cortó un renglón porque no cabía en el
-      recuadro, las partes se reúnen. Se reconoce porque la primera palabra del renglón
-      siguiente no habría cabido al final del anterior. `right` es el borde útil
-      (el del recuadro o el del texto normal); sin ese dato no se reúne nada.
+      recuadro, las partes se reúnen. Tienen que darse tres cosas: la primera palabra del
+      renglón siguiente no habría cabido al final del anterior; el siguiente empieza en el
+      borde izquierdo (quien parte por ancho no respeta la sangría); y el anterior quedó a
+      medias (`unfinished`). Solo con la primera, la regla unía instrucciones distintas
+      (E17): un renglón con sangría propia es un renglón del autor. `right` es el borde
+      útil (el del recuadro o el del texto normal); sin ese dato no se reúne nada.
     """
     per_char = sorted((x1 - x0) / len(t) for t, x0, x1, *_ in lines
                       if len(t) >= 8 and t == t.strip())
@@ -256,13 +276,17 @@ def rebuild_code(lines, right, log=None):
         lead = max(0, round((x0 - left) / cw))
         gap_rows = round((y0 - prev[1]) / step) - 1 if prev else 0
         first = text.strip().split(" ")[0]
-        if (prev and cols and gap_rows <= 0 and prev[0] >= 0.6 * cols
-                and prev[0] + 1 + len(first) > cols):
+        no_cabia = bool(prev and cols and gap_rows <= 0 and prev[0] >= 0.6 * cols
+                        and prev[0] + 1 + len(first) > cols)
+        al_borde = lead + len(text) - len(text.lstrip()) == 0
+        if no_cabia and al_borde and unfinished(out[-1]):
             if log is not None:
                 log.append((out[-1].strip()[-40:], text.strip()[:40]))
             out[-1] += " " + text.strip()
             joined += 1
         else:
+            if no_cabia and skipped is not None:
+                skipped.append((out[-1].strip()[-40:], text.strip()[:40]))
             out += [""] * max(0, min(gap_rows, 3))
             out.append(" " * lead + text)
         prev = (lead + len(text), y0)             # columna donde termina el renglón visible
@@ -621,10 +645,12 @@ def page_to_md(doc, page, ctx):
                 lines += items[j][2][1]
                 skip.add(j)
                 j += 1
-            joins = []
-            code, n_joined = rebuild_code(lines, code_right(boxes, lines, ctx["bp"]["right"]), joins)
+            joins, doubts = [], []
+            code, n_joined = rebuild_code(lines, code_right(boxes, lines, ctx["bp"]["right"]),
+                                          joins, doubts)
             ctx["code_joined"] += n_joined
             ctx.setdefault("code_joins", []).extend((page.number + 1, a, b) for a, b in joins)
+            ctx.setdefault("code_doubts", []).extend((page.number + 1, a, b) for a, b in doubts)
             out.append(f"```\n{code}\n```")
         elif isinstance(it, tuple):
             _, name, r = it
@@ -802,6 +828,9 @@ def extract(pdf_path, out_dir):
     if ctx["code_joined"]:
         rep.append(f"- Renglones de código reunidos (el original los partió por ancho): "
                    f"{ctx['code_joined']}. Revisar todos: lista al final.")
+    if ctx.get("code_doubts"):
+        rep.append(f"- Renglones de código que podrían estar partidos y no se unieron: "
+                   f"{len(ctx['code_doubts'])}. Lista al final.")
     unmapped, page_now = {}, 0                    # símbolos sin mapa de caracteres, por página
     for ln in md_text.split("\n"):
         m = re.match(r"<!-- p\.(\d+)", ln)
@@ -830,6 +859,12 @@ def extract(pdf_path, out_dir):
                 "lo unido continúa la misma instrucción; si es otra instrucción (otra variable, "
                 "otra sentencia, texto tras un comentario), separarlos en el `.md`.", "",
                 *[f"- p.{p}: `…{a}` + `{b}…`" for p, a, b in ctx["code_joins"]]]
+    if ctx.get("code_doubts"):
+        rep += ["", "## Renglones de código que podrían estar partidos (no se unieron)", "",
+                "El segundo renglón no habría cabido al final del primero, pero tiene sangría "
+                "propia o el primero está completo, así que quedaron separados, como en el "
+                "original. Unirlos a mano solo si el segundo continúa la misma instrucción.", "",
+                *[f"- p.{p}: `…{a}` / `{b}…`" for p, a, b in ctx["code_doubts"]]]
     (out_dir / "reporte.md").write_text("\n".join(rep) + "\n", encoding="utf-8")
     return md_file, out_dir / "reporte.md"
 
