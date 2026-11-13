@@ -38,6 +38,12 @@ Pasar `output/revision.png` al subagente `revisor-visual`. Si el documento tiene
 figuras o código largo, generar una segunda imagen con esas páginas (cambiar `range(n)`
 por los índices) y pasársela también. No abrir las imágenes en esta conversación.
 
+Para la segunda imagen elegir páginas con riesgo real: la tabla más ancha, un diagrama
+hecho con caracteres dentro de un bloque de código y la última tabla del documento. A
+58 dpi no se distingue la alineación de un diagrama: si el revisor lo marca, renderizar
+esa sola página a 110 dpi y volver a pasarla. Decirle al revisor qué páginas son y que
+el texto en español dentro de bloques de código es intencional.
+
 ## 3. Informe
 
 Tres líneas: resultado de `comparar.py`, observaciones del revisor, peso del PDF.

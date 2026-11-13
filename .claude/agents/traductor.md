@@ -20,7 +20,8 @@ Se traduce:
 No se toca, ni un carácter:
 
 - Bloques de código (entre ```) y código en línea (entre `` ` ``), aunque tengan
-  comentarios o cadenas en español.
+  comentarios o cadenas en español. Tampoco los marcadores dentro del código:
+  `<usuario>`, `<Capa>`, `onAlgo` quedan tal cual.
 - Comandos, nombres de archivo, rutas de imágenes, URL, fórmulas y cifras.
 - Las claves de la cabecera y los valores de `color`, `tamano`, `indice`, `numerar`,
   `version`, `fecha`, `logo`, `dpi_imagenes`, `fuente`, `autor`.
@@ -33,6 +34,8 @@ Cuida:
 - Inglés técnico natural, con los términos habituales del área; no calques la frase.
 - La misma cantidad de títulos, tablas, filas, ítems y cuadros que el original.
 - Si una frase es ambigua, tradúcela literal antes que interpretarla.
+- Si después de la ruta recibes un glosario, úsalo siempre para esos términos.
+- Una celda `[ ]` es una casilla sin marcar: déjala igual.
 
 No abras ningún otro archivo. Al terminar responde una sola línea:
 `ok <archivo>: <n> títulos, <n> bloques de código sin cambios`, o el problema que impidió

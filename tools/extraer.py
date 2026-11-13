@@ -223,8 +223,10 @@ def save_pixmap(pix, path):
 # ---------------------------------------------------------------------------
 # Bloques de código
 # ---------------------------------------------------------------------------
-def rebuild_code(lines, right):
+def rebuild_code(lines, right, log=None):
     """Reconstruye el código tal como se escribió. Devuelve (texto, renglones reunidos).
+    Si se pasa `log` (una lista), anota cada reunión como (final del renglón, renglón
+    que se le unió) para que el reporte las liste: la regla puede unir de más (E17).
 
     `lines` son renglones (texto, x0, x1, y0, y1, tamaño de letra).
     - Sangría: si el PDF la da por posición (sin espacios), se calcula con el ancho de letra.
@@ -256,6 +258,8 @@ def rebuild_code(lines, right):
         first = text.strip().split(" ")[0]
         if (prev and cols and gap_rows <= 0 and prev[0] >= 0.6 * cols
                 and prev[0] + 1 + len(first) > cols):
+            if log is not None:
+                log.append((out[-1].strip()[-40:], text.strip()[:40]))
             out[-1] += " " + text.strip()
             joined += 1
         else:
@@ -617,8 +621,10 @@ def page_to_md(doc, page, ctx):
                 lines += items[j][2][1]
                 skip.add(j)
                 j += 1
-            code, n_joined = rebuild_code(lines, code_right(boxes, lines, ctx["bp"]["right"]))
+            joins = []
+            code, n_joined = rebuild_code(lines, code_right(boxes, lines, ctx["bp"]["right"]), joins)
             ctx["code_joined"] += n_joined
+            ctx.setdefault("code_joins", []).extend((page.number + 1, a, b) for a, b in joins)
             out.append(f"```\n{code}\n```")
         elif isinstance(it, tuple):
             _, name, r = it
@@ -795,7 +801,19 @@ def extract(pdf_path, out_dir):
     ]
     if ctx["code_joined"]:
         rep.append(f"- Renglones de código reunidos (el original los partió por ancho): "
-                   f"{ctx['code_joined']}. Verificar una muestra.")
+                   f"{ctx['code_joined']}. Revisar todos: lista al final.")
+    unmapped, page_now = {}, 0                    # símbolos sin mapa de caracteres, por página
+    for ln in md_text.split("\n"):
+        m = re.match(r"<!-- p\.(\d+)", ln)
+        page_now = int(m.group(1)) if m else page_now
+        n_bad = ln.count("\x00") + ln.count("�")
+        if n_bad:
+            unmapped[page_now] = unmapped.get(page_now, 0) + n_bad
+    if unmapped:
+        rep.append(f"- Símbolos sin mapa de caracteres (quedaron como NUL en el .md): "
+                   f"{sum(unmapped.values())}, en p. "
+                   + ", ".join(f"{p} ({n})" for p, n in sorted(unmapped.items()))
+                   + ". Reemplazar cada uno por el símbolo que se ve en el original.")
     rep.append("")
     if report_rows:
         rep += ["## Páginas que requieren revisión", "",
@@ -806,6 +824,12 @@ def extract(pdf_path, out_dir):
     if ctx["figures"]:
         rep += ["", "## Figuras pendientes de describir", "",
                 *[f"- `{f}`" for f in ctx["figures"]]]
+    if ctx.get("code_joins"):
+        rep += ["", "## Renglones de código reunidos", "",
+                "Cada línea: página, final del renglón y lo que se le unió. Es correcto solo si "
+                "lo unido continúa la misma instrucción; si es otra instrucción (otra variable, "
+                "otra sentencia, texto tras un comentario), separarlos en el `.md`.", "",
+                *[f"- p.{p}: `…{a}` + `{b}…`" for p, a, b in ctx["code_joins"]]]
     (out_dir / "reporte.md").write_text("\n".join(rep) + "\n", encoding="utf-8")
     return md_file, out_dir / "reporte.md"
 

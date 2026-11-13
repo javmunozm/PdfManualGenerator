@@ -16,7 +16,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Read|Edit|Write|NotebookEdit|Glob|Grep|Bash|PowerShell",
+        "matcher": "Read|Edit|Write|NotebookEdit|Glob|Grep|Bash|PowerShell|Agent|Task",
         "hooks": [
           {
             "type": "command",

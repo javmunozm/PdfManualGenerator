@@ -385,6 +385,39 @@ class Builder:
             self.story.append(_Rule(self.primary))
 
     # --- bloques -----------------------------------------------------------
+    def col_widths(self, cells):
+        """Ancho de cada columna según su contenido, sobre el ancho total de la página.
+
+        Cada columna recibe al menos el ancho de su palabra más larga (un comando en
+        `código` cuenta entero), para que no se parta por la mitad; lo que sobra se
+        reparte según cuánto texto tiene cada una. Si ni las palabras caben, el ancho se
+        reparte en proporción a ellas.
+        """
+        ncols, size, pad = len(cells[0]), self.s["cell"].fontSize, 14
+        need, want = [0.0] * ncols, [0.0] * ncols
+        for row in cells:
+            for c, cell in enumerate(row):
+                for part in re.split(r"<br\s*/?>", cell, flags=re.I):
+                    line = 0.0
+                    for i, piece in enumerate(re.split(r"`([^`]+)`", part)):
+                        font = "Courier" if i % 2 else "Helvetica-Bold"   # negrita: cota superior
+                        if not i % 2:
+                            piece = re.sub(r"\[([^\]]+)\]\([^)\s]+\)", r"\1", piece)
+                            piece = piece.replace("*", "").replace("\\|", "|")
+                        for word in piece.split():
+                            need[c] = max(need[c], stringWidth(word, font, size))
+                        line += stringWidth(piece, font, size)
+                    want[c] = max(want[c], line)
+        cap = 0.6 * self.fw if ncols > 1 else self.fw
+        need = [min(n + pad, cap) for n in need]
+        want = [max(min(w + pad, cap), n) for w, n in zip(want, need)]
+        if sum(need) >= self.fw:
+            return [self.fw * n / sum(need) for n in need]
+        if sum(want) <= self.fw:
+            return [self.fw * w / sum(want) for w in want]
+        spare, flex = self.fw - sum(need), [w - n for w, n in zip(want, need)]
+        return [n + spare * f / sum(flex) for n, f in zip(need, flex)]
+
     def table(self, rows):
         cells = [split_row(r) for r in rows]
         cells = [r for r in cells if not all(re.fullmatch(r":?-{2,}:?", c) for c in r)]
@@ -394,7 +427,7 @@ class Builder:
         cells = [r + [""] * (ncols - len(r)) for r in cells]
         data = [[self.para(c, self.s["cell_head"], "#FFFFFF", br=True) for c in cells[0]]]
         data += [[self.para(c, self.s["cell"], br=True) for c in r] for r in cells[1:]]
-        t = Table(data, colWidths=[self.fw / ncols] * ncols, repeatRows=1, hAlign="LEFT")
+        t = Table(data, colWidths=self.col_widths(cells), repeatRows=1, hAlign="LEFT")
         style = [
             ("BACKGROUND", (0, 0), (-1, 0), self.primary),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),

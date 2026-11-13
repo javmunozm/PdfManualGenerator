@@ -24,16 +24,31 @@ por partes, en subagentes, y se verifica con un script en vez de releer.
 ## Pasos
 
 1. `python tools/costo.py $ARGUMENTS`: mirar el tamaño. Avisar al usuario el costo
-   aproximado antes de empezar si pasa de ~40.000 tokens.
+   aproximado antes de empezar si pasa de ~40.000 tokens. Si el usuario ya pidió el
+   proceso completo, avisar y seguir; si solo pidió extraer o regenerar, preguntar.
+   Antes de partir: `validar.py` sin errores (un NUL impide guardar la parte).
 2. `python tools/capitulos.py partir documentos/$ARGUMENTS/$ARGUMENTS.md`
 3. Por cada archivo de `documentos/$ARGUMENTS/partes/`, lanzar el subagente `traductor`
-   con la ruta de esa parte y nada más. Hasta 3 en paralelo. No leer las partes aquí.
+   con la ruta de esa parte. Hasta 3 en paralelo, reponiendo una por cada una que
+   termina. No leer las partes aquí, con estas dos salvedades:
+   - **Partes de menos de ~300 tokens** (portadillas, checklists): traducirlas aquí con
+     `Edit`. Cada subagente cuesta unos 7.000 tokens de arranque aunque la parte tenga
+     40; en un manual de 87.000 tokens ese arranque fue el 40% del gasto de traducir.
+     Con `--tanda 10000` en el paso 2 salen la mitad de las partes.
+   - **Glosario**: traducir primero la parte del capítulo 1, mirar con `grep` cómo quedó
+     el término propio del manual (el que no tiene traducción obvia) y pasar a las
+     demás partes una línea de glosario después de la ruta. Sin eso, 28 traductores
+     independientes eligen términos distintos.
+   No responder a cada aviso de término con un resumen: solo lanzar la siguiente.
 4. `python tools/capitulos.py unir documentos/$ARGUMENTS/$ARGUMENTS.md`
    (el español queda en `$ARGUMENTS.anterior.md`).
 5. `python tools/comparar_traduccion.py documentos/$ARGUMENTS/$ARGUMENTS.anterior.md documentos/$ARGUMENTS/$ARGUMENTS.md`
    - Cada diferencia nombra qué cambió (un bloque de código, una cifra, una tabla).
      Corregir solo eso con `Edit` puntual y repetir hasta `RESULTADO: CORRECTO`.
    - Aviso de tamaño (menos de 65%): una parte se resumió. Volver a traducir esa parte.
+   - «código en línea: faltan/sobran»: el traductor tradujo marcadores como `<usuario>`.
+     Devolverlos al original con un script de reemplazos exactos por línea.
+   - Si `fecha` de la cabecera tiene un mes escrito («Octubre 2026»), traducirlo a mano.
 6. `python tools/validar.py documentos/$ARGUMENTS/$ARGUMENTS.md`
 7. Cuando el PDF esté verificado, borrar `documentos/$ARGUMENTS/partes/`.
 

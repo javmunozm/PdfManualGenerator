@@ -23,6 +23,16 @@ archivos de `sources/`. Si el archivo no existe, decirlo y parar.
      del `.md` y la lista de imágenes, en tandas de hasta 8.
    - Tabla sin reconstruir: abrir solo su recorte de `assets/`.
    - "Faltan en ...": ubicar ese texto con un script sobre el original y agregarlo.
+   - "Renglones de código reunidos: N": revisar **todos** con la lista del final del
+     reporte (no una muestra). Si lo unido es otra instrucción (otra variable, otra
+     sentencia, texto detrás de un comentario), separarlo en el `.md` con su sangría.
+     En un manual real las 52 uniones fueron falsas (auditoría, E17).
+   - "Símbolos sin mapa de caracteres": son NUL en el `.md`. Reemplazarlos aquí por el
+     símbolo que se ve en el original (una casilla es `[ ]`); con NUL el subagente
+     `traductor` no puede guardar esa parte.
+   - Diagrama que quedó como texto suelto (rótulos en negrita solos, sin frases):
+     renderizar **solo esa región** a `assets/` y pasarla a `describir-figuras` para que
+     lo deje como tabla de componentes y tabla de conexiones.
 5. Comprobar que no queda nada:
    `grep -n "describir\|TRANSCRIBIR\|^Enlaces:" extracted/<nombre>/<nombre>.md`
 6. Informar en 6 líneas o menos: páginas, cobertura, pendientes resueltos, qué quedó.

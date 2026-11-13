@@ -55,20 +55,21 @@ Ninguno necesita abrir `sources/`.
 
 ## 3. Bibliotecas instaladas
 
-Python 3.13.15 en Windows 11. Versiones instaladas al 10/11/2026
-(`pip install -r requirements.txt` instala las seis primeras):
+Python 3.14.10 en Windows 11. Versiones instaladas al 12/11/2026, tras reinstalar el
+sistema (`pip install -r requirements.txt` instala las seis primeras; las 58 pruebas
+pasan con estas versiones):
 
 | Biblioteca | Instalada | Mínima (`requirements.txt`) | La usa | Para qué |
 |---|---|---|---|---|
-| `reportlab` | 5.0.1 | 4.0 | `manual.py`, `tools/validar.py`, `tests/` | Construir el PDF: portada, índice, marcadores, tablas, recuadros. En `validar.py`, saber qué caracteres tienen glifo. |
-| `pillow` | 12.2.0 | 10.0 | `manual.py`, `tools/costo.py` | Reducir el peso de las imágenes; medir las de `assets/`. Opcional para generar. |
-| `pymupdf` | 1.28.2 | 1.24 | `tools/extraer.py`, `tools/comparar.py`, `tests/`, revisión visual | Leer PDF: texto con posición, tablas, imágenes, enlaces, marcadores; renderizar páginas. |
+| `reportlab` | 5.1.0 | 4.0 | `manual.py`, `tools/validar.py`, `tests/` | Construir el PDF: portada, índice, marcadores, tablas, recuadros. En `validar.py`, saber qué caracteres tienen glifo. |
+| `pillow` | 13.0.0 | 10.0 | `manual.py`, `tools/costo.py` | Reducir el peso de las imágenes; medir las de `assets/`. Opcional para generar. |
+| `pymupdf` | 2.1 | 1.24 | `tools/extraer.py`, `tools/comparar.py`, `tests/`, revisión visual | Leer PDF: texto con posición, tablas, imágenes, enlaces, marcadores; renderizar páginas. |
 | `python-docx` | 1.2.0 | 1.1 | `tools/extraer.py` | Leer Word (`.docx`). |
 | `python-pptx` | 1.0.2 | 0.6.23 | `tools/extraer.py` | Leer PowerPoint (`.pptx`): diapositivas, notas, datos de gráficos. |
 | `openpyxl` | 3.1.5 | 3.1 | `tools/extraer.py` | Leer Excel (`.xlsx`, `.xlsm`). |
-| `lxml` | 6.1.1 | — | (dependencia de `python-docx` y `python-pptx`) | Se instala sola. |
-| `pytest` | 9.0.3 | — | opcional | Las pruebas usan `unittest`; `pytest` también las ejecuta. |
-| `pypdfium2` | 5.15.2 | — | nadie | Estaba instalada; el flujo ya no la usa. |
+| `lxml` | 6.1.3 | — | (dependencia de `python-docx` y `python-pptx`) | Se instala sola. |
+| `pymupdf_layout`, `pymupdf4llm`, `onnxruntime`, `tabulate` | 2.1 · 2.1 · 1.31.1 · 0.10.0 | — | nadie | Las trae PyMuPDF 2.x como dependencias; el flujo no las usa. |
+| `pytest` | no instalada | — | opcional | Las pruebas usan `unittest`; `pytest` también las ejecuta. |
 
 De la biblioteca estándar: `argparse`, `re`, `json`, `hashlib`, `zipfile`,
 `xml.etree.ElementTree` (lectura directa de los paquetes de Office para la cobertura),
@@ -116,7 +117,9 @@ nunca pase por la conversación principal.
 | Describir figuras y transcribir escaneados | Caro por imagen. | Subagente `describir-figuras`: otro modelo, y las imágenes no quedan en la conversación. |
 | Leer el `.md` completo | Su tamaño, en cada turno que siga. | `tools/costo.py` da el mapa; se lee por rangos de líneas (`grep -n "^#"`). |
 | Traducir | El documento entero como salida, que es lo más caro por token. | `capitulos.py` lo parte; cada parte la traduce un `traductor` y se escribe con `Write` (sin repetir el texto viejo); la verificación la hace un script. |
-| Reescribir el `.md` para un cambio | Todo el documento como salida. | `Edit` puntual. |
+| Arranque de cada subagente | Unos 7.000 tokens por lanzamiento, tenga la parte 40 tokens o 7.000. En un manual de 87.000 tokens fueron 29 lanzamientos y ~473.000 tokens: cerca del 40% fue arranque. | Partes de menos de ~300 tokens se traducen en la conversación; `--tanda 10000` para la mitad de las partes. |
+| Avisos de los subagentes en segundo plano | Cada subagente despierta dos veces a la conversación principal, con todo el historial. | No resumir en cada aviso: solo lanzar la parte siguiente. Modelo intermedio en la conversación principal (auditoría, 12.3). |
+| Reescribir el `.md` para un cambio | Todo el documento como salida. | `Edit` puntual; si el cambio se repite muchas veces, un script en archivo. |
 | Verificar leyendo el PDF | Todo el documento otra vez. | `comparar.py`: unas líneas y un código de salida. |
 | Revisión visual página por página | Una imagen por página. | Una imagen con 4 páginas a baja escala, vista por `revisor-visual`. |
 | Volver a extraer | Repite todo lo anterior. | `extraer.py` no lo hace si el original no cambió. |
@@ -139,7 +142,7 @@ Los tokens que muestran las herramientas son aproximados (caracteres / 3,5).
 
 | Qué | Dónde | Efecto |
 |---|---|---|
-| Hook `guardia.py` (PreToolUse) | `.claude/hooks/`, `.claude/settings.json` | Deniega editar `sources/`; pide confirmación para leerlo o nombrarlo en un comando; deniega leer PDF y Office directamente. |
+| Hook `guardia.py` (PreToolUse) | `.claude/hooks/`, `.claude/settings.json` | Deniega editar `sources/`; pide confirmación para leerlo o nombrarlo en un comando; deniega leer PDF y Office directamente. También pide confirmación si se llega a `sources/` sin nombrarlo: `Glob` de `**/*`, listado recursivo desde la raíz, comodines, o un encargo a un subagente (H6). |
 | Reglas de permiso | `.claude/settings.json` | `deny` editar `sources/`, `ask` leerlo. |
 | No pisar trabajo manual | `extraer.py`, `preparar.py`, `capitulos.py` | Se niegan si el destino ya existe; con `--forzar` guardan `<n>.anterior.md`. |
 | Pruebas | `tests/` (`python -m unittest discover tests`) | Una por cada error corregido. Crean sus propios archivos. |

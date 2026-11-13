@@ -102,6 +102,8 @@ frecuente o con aviso. **Bajo** = detalle.
 | E14 | Bajo | Cabecera: el título se toma de metadatos sin valor ("(anonymous)", "Microsoft Word - x.docx"); la `institucion` de la portada no pasa a la cabecera si no tiene etiqueta. | Probado "(anonymous)". En la demo se perdió "MATERIAL DE CLASE". | Descartar títulos de una lista conocida y usar el texto más grande de la portada; tomar como institución la primera línea de la portada. |
 | E15 | Bajo | Mensajes: archivo inexistente o PDF protegido terminan en traza de Python. El índice solo se detecta si tiene puntos guía. La estimación de tokens (caracteres / 4) es optimista para español. | Lectura. | Mensajes de una línea; detectar el índice también por los marcadores; dividir por 3,5. |
 | E16 | Alto | Código de un PDF con recuadros de letra grande: los renglones que el original partió por ancho quedan como renglones separados (cadenas cortadas a la mitad), se pierde la sangría y el pie de página queda dentro del bloque si está lejos del borde ("Page 95 of 168"). El manual regenerado hereda el código roto. | Reportado por el usuario con dos fragmentos. Reproducido con un PDF de prueba. | **Resuelto.** Sangría por posición; los renglones se reúnen cuando la primera palabra del siguiente no habría cabido en el anterior (el ancho sale del recuadro de fondo o del texto normal); se omite el renglón idéntico, o el contador de páginas, que ocupa la misma posición en la mitad de las páginas o más. El reporte dice cuántos renglones reunió. |
+| E17 | Alto | La reunión de renglones de código (corrección de E16) une renglones que eran instrucciones distintas: basta que el anterior pase del 60% del ancho y que la primera «palabra» del siguiente no quepa, y en código esa palabra suele ser larga (`res.status(...).json({`, `SESSION_SECRET=...`). El resultado no funciona al copiarlo: una variable de `.env` queda dentro de un comentario, dos claves YAML en una línea, sentencias de TypeScript detrás de un `//`. Además se pierde la sangría del renglón unido. | Manual_4_Node_React19_MongoDB (12/11/2026): 52 uniones, las 52 falsas; en todas, el renglón siguiente traía su propia sangría en el original. Se deshicieron a mano en `extracted/` y `documentos/`. | **Parcial (12/11/2026):** `reporte.md` ahora lista cada unión con su página (prueba `test_E17_*`) y la skill `extraer` pide revisarlas todas. **Pendiente** la regla: no unir cuando el renglón siguiente tiene sangría propia (espacios iniciales en el texto o posición distinta de la continuación típica), ni cuando el anterior termina una instrucción o es un comentario. Listar cada unión en `reporte.md` con su página, para poder revisarlas. |
+| E18 | Medio | Un símbolo cuya fuente no tiene mapa de caracteres se extrae como carácter NUL (`\x00`) y nadie lo detecta: `extraer.py` informa 100% de cobertura y `validar.py` no lo marca. La herramienta `Write` rechaza un archivo con NUL, así que el subagente `traductor` no puede guardar esa parte. | Manual_4_Node_React19_MongoDB: 12 NUL (11 casillas del checklist de la p.149, 1 símbolo en una tabla de la p.104); en el original se ven como un recuadro vacío (glifo `.notdef`). Se reemplazaron a mano por `[ ]` y `↔`. | **Resuelto en la detección (12/11/2026):** `reporte.md` informa cuántos hay y en qué páginas, y `validar.py` los trata como error (prueba `test_E18_*`). **Pendiente** en `extraer.py`: reemplazar NUL y U+FFFD por una marca visible y anotar la página en `reporte.md`. En `validar.py`: tratar los caracteres de control como error. |
 
 ---
 
@@ -124,6 +126,7 @@ frecuente o con aviso. **Bajo** = detalle.
 | G13 | Bajo | Un documento sin capítulos `#` (lo que produce el extractor para PowerPoint y Excel) numera "0.1, 0.2". `fecha:` vacía deja la portada sin fecha en vez de usar la de hoy. | Probado ambos. | No numerar niveles sin padre, o avisar. Tratar el valor vacío como ausente. |
 | G14 | Alto | Todos los marcadores y todos los enlaces del índice llevan a la portada. Las páginas se escriben al final (para poder poner "Página X de Y") y el contador de páginas no avanzaba mientras se registraban los destinos. | Verificado en `ejemplo.pdf`: los 21 marcadores apuntaban a la página 1. Encontrado al implementar la fase 2. | **Resuelto.** El contador avanza en cada página diferida y se reinicia al escribir. `ejemplo.pdf` regenerado. |
 | G15 | Alto | Recuadros de código: un renglón más largo que el recuadro se cortaba en cualquier letra, a mitad de palabra, y la continuación se confundía con un renglón nuevo. | Reportado por el usuario. | **Resuelto.** Cada renglón ocupa un renglón: primero se reduce la letra del bloque (8,5 → 7 pt, unos 100 caracteres); si aun así no cabe, se parte en un espacio, con sangría mayor y una marca gris dibujada (no es texto: no ensucia al copiar). Un renglón no se separa de su continuación al cambiar de página. |
+| G16 | Alto | Tablas: todas las columnas tenían el mismo ancho, así que un comando o un nombre largo en una columna angosta se partía a mitad de palabra (`keycloak-admi` / `n.sh`) aunque sobrara espacio en otra columna. | Manual_4_Node_React19_MongoDB: 26 palabras partidas en 157 páginas. | **Resuelto.** `col_widths`: cada columna recibe al menos el ancho de su palabra más larga (el `código` cuenta entero) y el resto se reparte según el texto de cada una. Pruebas `test_G16_*`. |
 
 ---
 
@@ -136,6 +139,9 @@ frecuente o con aviso. **Bajo** = detalle.
 | C3 | Alto | El código de salida es siempre 0. No hay forma de declarar faltas aceptadas (el índice, un encabezado antiguo) ni de saber dónde falta cada palabra. | Probado. | Código 1 si falta algo no aceptado; `--ignorar "texto"`; mostrar página o sección del origen. |
 | C4 | Medio | Si una palabra faltante tiene caracteres fuera de cp1252, el programa falla al imprimirla (`UnicodeEncodeError`). | Probado con "αβγ" en la consola de Windows. | `sys.stdout.reconfigure(encoding="utf-8", errors="replace")` en los tres scripts. |
 | C5 | Medio | Solo acepta PDF o texto como origen: un `.docx` termina en `UnicodeDecodeError`. No compara estructura: títulos (solo cuenta marcadores), tablas, imágenes ni enlaces. | Probado el primero. | Aceptar los formatos del extractor. Agregar comparación de la lista de títulos y conteo de tablas, figuras y enlaces. |
+| C6 | Alto | `--estricto` contaba como texto sobrante (y como cambio de orden) el encabezado que `manual.py` repite cuando una tabla sigue en otra página: ningún documento con una tabla de más de una página podía terminar en código 0. | Manual_4_Node_React19_MongoDB: unas 60 palabras «sobrantes» que eran encabezados repetidos. | **Resuelto.** Con origen `.md`, se descartan del PDF las apariciones de un encabezado de tabla al inicio de una página que el origen no tiene (`drop_repeated_headers`). Pruebas `test_C6_*`: una fila duplicada de verdad sigue siendo falla. |
+| C7 | Medio | Los símbolos que `manual.py` dibuja con ZapfDingbats (`▼`, `▲`) se leen del PDF como letras («M», «L») y aparecían como palabras sobrantes y pares en otro orden. | Manual_4_Node_React19_MongoDB: `m x7 l` en los diagramas dentro de bloques de código. | **Resuelto.** `pdf_lines` no toma el texto de los tramos en fuente Dingbats. Prueba `test_C7_*`. |
+| C8 | Medio | Una palabra partida sin guion porque no cabe en su celda (queda en dos o más renglones) se contaba como faltante y sus trozos como sobrantes. E8 solo cubría el corte con guion. | Probado con identificadores de 70 caracteres en una tabla de dos columnas. | **Resuelto.** En el PDF generado los trozos se unen si la palabra completa existe en el origen y algún trozo no (`to_tokens(..., soft=True)`). Prueba `test_C8_*`. |
 
 ---
 
@@ -223,6 +229,7 @@ Escribirlos en Python (ya es dependencia y funciona igual en PowerShell y en Bas
 | H3 | `PostToolUse` en `Edit`, `Write` | Si el archivo es un `.md` de `documentos/` o `extracted/`, ejecutar `validar.py` y devolver los avisos. | Detecta G1, G4, G8 al escribir, no al generar. |
 | H4 | `Stop` | Si un `.md` de `documentos/` es más nuevo que su PDF, o la última comparación falló, impedir el cierre con el motivo. Respetar `stop_hook_active` para no entrar en bucle. | "El `.md` es la fuente": evita entregar un PDF desactualizado. |
 | H5 | `SessionStart` | Insertar la salida de `estado.py` (unas 10 líneas). | Evita explorar carpetas al comenzar. |
+| H6 | `PreToolUse` en `Glob`, `Bash`, `PowerShell`, `Agent` | **Implementado (12/11/2026).** Pide confirmación cuando se llega a `sources/` sin nombrarlo: `Glob` con un patrón que puede entrar (`**/*.pdf`, `s*/*`), listado o búsqueda recursiva desde la raíz (`ls -R`, `Get-ChildItem -Recurse`, `find .`, `tree`, `grep -r`, `rg --no-ignore`), ruta con comodines que alcanza la carpeta y encargo a un subagente que la nombra. | H1 solo miraba el nombre. `Glob` no respeta `.gitignore` (comprobado); `Grep` sí, y una prueba vigila que `sources/` siga ahí. Límite: un script propio que recorra carpetas no se detecta; es una barrera contra descuidos, no un aislamiento. |
 
 Reglas de permiso que acompañan a H1: `deny` para `Edit(./sources/**)` y
 `Write(./sources/**)`; `ask` para `Read(./sources/**)`; `allow` para
@@ -272,6 +279,71 @@ nunca el PDF; resultados a archivos, resúmenes a la terminal); los comandos; y 
   `README.md`, ni cómo se comporta el extractor con los documentos reales.
 - PDF escaneados, de dos columnas y con gráficos vectoriales: solo lectura de código.
 - Los puntos marcados **Lectura**.
-- H1 y H2 se probaron con llamadas simuladas, no en una sesión real. H3 a H5, las
-  skills y los subagentes de la sección 9 siguen siendo diseño.
+- H1 y H2 se probaron con llamadas simuladas y, el 12/11/2026, en una sesión real
+  (sección 12.2). H3 a H5 siguen siendo diseño. Las skills y los subagentes se usaron
+  de punta a punta en esa sesión (sección 12).
 - E16 (código partido) y la regla del pie lejos del borde: solo con PDF de prueba.
+
+## 12. Lecciones del primer manual real (Manual_4_Node_React19_MongoDB, 12/11/2026)
+
+Primer documento de `sources/` procesado de punta a punta: 151 páginas, ~87.000 tokens,
+traducido al inglés, 157 páginas generadas, `comparar.py --estricto` en código 0.
+
+### 12.1 Qué se aprendió
+
+- **Cobertura 100% no significa extracción correcta.** El reporte decía 100% y aun así
+  había 52 renglones de código mal unidos (E17), 12 símbolos convertidos en NUL (E18),
+  todos los títulos en un solo nivel y un diagrama aplanado como texto. La cobertura
+  cuenta palabras; no ve estructura ni código. Ninguno de esos problemas lo detectaba
+  una herramienta: los dos primeros se encontraron al investigar otra falla.
+- **El modo estricto no se había probado con tablas de más de una página** (C6, C7, C8,
+  G16). Las pruebas usan documentos de 3 páginas; los defectos aparecen con 150.
+- **La estructura se corrige antes de traducir.** Jerarquía, cuadros y validación en
+  español, una sola vez; `capitulos.py` solo parte bien si los capítulos están en `#`.
+- **El costo de traducir es sobre todo arranque de subagentes.** 29 lanzamientos de
+  `traductor` gastaron ~473.000 tokens para ~87.000 de contenido; cada lanzamiento
+  cuesta ~7.000 aunque la parte tenga 40. Pendiente: que `capitulos.py` una las partes
+  chicas con su vecina y usar una tanda de ~10.000.
+- **La conversación principal también pesa:** cada subagente en segundo plano la
+  despierta dos veces (informe y aviso de término), con todo el historial.
+- **Scripts en archivo, no `python -c`,** para tocar los `.md` desde PowerShell: las
+  comillas invertidas se alteran y la detección de bloques de código falla sin error.
+- **Tras reinstalar el sistema:** `pip install -r requirements.txt` trajo PyMuPDF 2.1,
+  Pillow 13, reportlab 5.1 y Python 3.14; las pruebas pasan. Git exige
+  `safe.directory` porque la carpeta conserva el dueño anterior.
+
+### 12.2 Hooks: verificados en una sesión real
+
+- H1 y H2 funcionan de punta a punta: leer `ejemplo.pdf` con `Read` fue denegado en
+  vivo con el mensaje del hook; los cinco comandos de la sesión que nombraban
+  `sources/` reciben `ask`, y `Edit`/`Write`/`NotebookEdit` en `sources/` reciben `deny`.
+- No se puede ver desde el modelo si cada `ask` se mostró al usuario o lo aprobó el
+  modo de permisos: los comandos se ejecutaron.
+- Huecos encontrados (el hook no objetaba porque no se nombra `sources`): `Glob` con
+  `**/*.pdf` o `**/*` sin ruta, `Get-ChildItem -Recurse` o `ls -R` en la raíz, un comodín
+  como `sourc*` y el texto de un encargo a un subagente. Ninguno se usó en la sesión.
+  **Cerrados con H6** (sección 9.3) y sus pruebas en `tests/test_hooks.py`. `Grep` sin
+  ruta no era un hueco: ripgrep no entra a carpetas de `.gitignore`.
+- Efecto práctico de H6: un `Glob` de `**/*.md` desde la raíz ahora pregunta. Para
+  evitarlo, acotar a una carpeta (`docs/**/*.md`) o usar `path`.
+- H3, H4 y H5 siguen sin implementar. H3 (validar al editar) habría detectado los NUL.
+
+### 12.3 Qué modelo usar
+
+- El trabajo rutinario (ejecutar scripts, lanzar subagentes, leer informes de una línea)
+  no necesita el modelo más caro. Con las skills actualizadas, una regeneración normal
+  puede ir con Sonnet u Opus en la conversación principal; los subagentes ya usan
+  Sonnet (traducción: 99% del tamaño y 5 desvíos menores, todos detectados por script)
+  y Haiku (revisión visual: suficiente, con un falso positivo por la baja escala).
+- Donde sí pesó la capacidad del modelo fue en depurar herramientas: separar tres
+  causas distintas de una misma falla de `comparar.py`, y demostrar con la sangría del
+  original que las 52 uniones eran falsas. Eso es desarrollo del flujo, no su uso.
+- Los defectos de fondo no los encontró el modelo por ser más capaz sino por una
+  salida de diagnóstico; la protección real es que la herramienta los informe (E17,
+  E18), no subir de modelo.
+- Dato de la sesión: se hizo entera con Fable 5.2 en la conversación principal y el
+  límite de uso del plan se alcanzó antes de terminar la retrospectiva. A precio de
+  lista de la API (tabla consultada el 12/11/2026, vigente al 03/11/2026), Fable 5.2
+  cuesta el doble que Opus 5.5 y cuatro veces lo que Sonnet 5.5 por token.
+- Recomendación: modelo intermedio por defecto; subir solo cuando `comparar.py` falle
+  por una causa que no esté en este documento o cuando se cambien las herramientas.

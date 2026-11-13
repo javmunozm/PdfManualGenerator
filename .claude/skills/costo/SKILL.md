@@ -16,7 +16,11 @@ allowed-tools:
    - qué etapas son caras **en este documento** (visión si hay figuras por describir,
      traducción si corresponde por la regla 2 de `CLAUDE.md`);
    - el plan: cuántas tandas y cuántos subagentes.
-3. Si la traducción o las figuras superan ~40.000 tokens, preguntar antes de empezar.
+3. Si la traducción o las figuras superan ~40.000 tokens, preguntar antes de empezar,
+   salvo que el usuario ya haya pedido el proceso completo de ese documento: entonces
+   avisar el costo y seguir.
+4. Al estimar la traducción, sumar el arranque de los subagentes: unos 7.000 tokens por
+   parte, además del contenido.
 
 ## Qué cuesta y qué no
 

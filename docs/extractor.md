@@ -96,7 +96,8 @@ observaciones"** y no hay figuras pendientes, la extracción está terminada.
 | **Faltan en ...** (Word, PowerPoint, Excel) | El reporte dice en qué parte del archivo está lo que no se extrajo: pies de página, notas al pie, cuadros de texto, SmartArt, comentarios. La cobertura se calcula contra el archivo real, no contra lo extraído. | Agregar ese texto en su lugar, o en un comentario si es un pie repetido. |
 | **Imágenes en el original: N \| extraídas: M** | Hay imágenes que no se guardaron (por ejemplo, las de un marcador de posición de PowerPoint). | Exportarlas con un script a `assets/` y referenciarlas. |
 | **Texto único en la zona de encabezado/pie, conservado en el cuerpo** | Suele ser una nota al pie: aparece una sola vez, así que no se trató como pie repetido. | Dejarlo donde corresponde (junto a su llamada) o borrarlo si de verdad era un pie. |
-| **Renglones de código reunidos** | El original partió renglones de código por falta de ancho y el extractor los unió. | Revisar una muestra: cada renglón debe ser una instrucción completa. |
+| **Renglones de código reunidos** | El extractor unió renglones que cree que el original partió por falta de ancho. La regla une de más (auditoría, E17): el reporte lista cada unión al final, con su página. | Revisar **todas**: si lo unido es otra instrucción (otra variable, otra sentencia, texto detrás de un comentario), separarlo en su propio renglón con su sangría. |
+| **Símbolos sin mapa de caracteres** | La fuente del original no dice qué carácter es (casillas, flechas): quedan como NUL en el `.md`. `validar.py` los rechaza. | Reemplazar cada uno por el símbolo que se ve en esa página (una casilla vacía: `[ ]`). |
 
 Para abrir imágenes, usar las de `assets/` (ya recortadas y en resolución moderada).
 Nunca renderizar todas las páginas.

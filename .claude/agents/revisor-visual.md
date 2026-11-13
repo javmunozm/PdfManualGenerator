@@ -18,7 +18,9 @@ baja escala. Ábrelas con Read y busca solo problemas que se ven:
 - Cuadrados negros (■) en lugar de letras; asteriscos, `#` o `<br>` impresos tal cual.
 - Páginas casi vacías sin motivo; un título solo al final de una página.
 
-A esta escala no se puede leer el texto: no opines sobre redacción ni ortografía.
+A esta escala no se puede leer el texto: no opines sobre redacción, ortografía ni
+idioma (el código y sus comentarios pueden estar en otro idioma a propósito). Si no
+puedes confirmar algo a esta escala, dilo así en vez de darlo por malo.
 No abras ningún otro archivo.
 
 Responde `sin observaciones`, o una lista de hasta 8 líneas con el formato

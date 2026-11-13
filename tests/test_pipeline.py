@@ -74,6 +74,29 @@ class Comparar(Caso):
         self.assertEqual(rc, 0, out)
         self.assertIn("RESULTADO: CORRECTO", out)
 
+    def test_C6_encabezado_de_tabla_repetido_en_otra_pagina_no_es_texto_sobrante(self):
+        filas = "".join(f"| Concepto {i} | Detalle de la fila {i} |\n" for i in range(1, 121))
+        md, pdf = self.generar("larga", "# T\n\n| Nombre | Explicación |\n|---|---|\n" + filas)
+        with pymupdf.open(pdf) as doc:
+            self.assertGreater(doc.page_count, 4)                # la tabla ocupa varias páginas
+            self.assertGreater(sum("Explicación" in p.get_text() for p in doc), 1)
+        rc, out = run("tools/comparar.py", md, pdf, "--estricto")
+        self.assertEqual(rc, 0, out)
+
+    def test_C6_un_encabezado_repetido_no_tapa_una_fila_duplicada(self):
+        filas = "".join(f"| Concepto {i} | Detalle de la fila {i} |\n" for i in range(1, 121))
+        origen = self.md("origen", "# T\n\n| Nombre | Explicación |\n|---|---|\n" + filas)
+        _, pdf = self.generar("doble", "# T\n\n| Nombre | Explicación |\n|---|---|\n" + filas
+                              + "| Concepto 7 | Detalle de la fila 7 |\n")
+        rc, out = run("tools/comparar.py", origen, pdf, "--estricto")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("sobra texto", out)
+
+    def test_C7_simbolos_dibujados_con_fuente_de_simbolos_no_son_palabras(self):
+        md, pdf = self.generar("flechas", "# T\n\n```\nCliente\n   ▼\nServidor\n   ▲\nBase\n```\n")
+        rc, out = run("tools/comparar.py", md, pdf, "--estricto")
+        self.assertEqual(rc, 0, out)
+
     def test_C1_contenido_borrado_aunque_sus_palabras_esten_en_otra_parte(self):
         resumen = "# Resumen\n\nUsar guantes y lentes. Encender, calibrar y medir el equipo.\n"
         completo = self.md("completo", "# Seguridad\n\nUsar guantes y lentes.\n\n# Pasos\n\n"
@@ -201,6 +224,22 @@ class Generador(Caso):
         self.assertNotIn("<br>", " ".join(renglones))
         self.assertEqual(run("tools/comparar.py", md, pdf, "--estricto")[0], 0)
 
+    def test_G16_un_comando_largo_en_una_celda_no_se_parte(self):
+        comando = "./scripts/keycloak-admin.sh"                          # no cabe en 1/3 del ancho
+        md, pdf = self.generar("ancho", "# T\n\n| Paso | Comando | Nota |\n|---|---|---|\n"
+                               f"| 1 | `{comando} add-role maria` | Asigna el rol a la persona "
+                               "indicada en el comando y lo confirma. |\n")
+        with pymupdf.open(pdf) as doc:
+            renglones = [ln.strip() for ln in doc[2].get_text().splitlines()]
+        self.assertTrue(any(comando in r for r in renglones), renglones)
+        self.assertEqual(run("tools/comparar.py", md, pdf, "--estricto")[0], 0)
+
+    def test_C8_palabras_que_no_caben_en_ninguna_columna_no_son_faltantes(self):
+        a, b = "identificador_muy_largo_" * 3 + "a", "otro_nombre_extenso_" * 4 + "b"
+        md, pdf = self.generar("partida", f"# T\n\n| Uno | Dos |\n|---|---|\n| `{a}` | `{b}` |\n")
+        rc, out = run("tools/comparar.py", md, pdf, "--estricto")
+        self.assertEqual(rc, 0, out)
+
     def test_G7_archivo_con_bom_conserva_la_cabecera(self):
         md = self.tmp / "bom.md"
         md.write_bytes(("\ufeff---\ntitulo: Con BOM\nautor: Ada\n---\n\n# Uno\n\nTexto.\n").encode("utf-8"))
@@ -231,6 +270,12 @@ class Validar(Caso):
         for esperado in ("color «azul»", "sin glifo", "figura sin describir", "imagen no encontrada",
                          "después de -->", "sin cerrar"):
             self.assertIn(esperado, out)
+
+    def test_E18_un_caracter_nul_es_error(self):
+        md = self.md("nul", "# T\n\n| Paso | Hecho |\n|---|---|\n| Revisar | \x00 |\n")
+        rc, out = run("tools/validar.py", md)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("U+0000", out)
 
     def test_avisos_no_fallan_salvo_en_estricto(self):
         md = self.md("avisos", "## Sin capitulo\n\n#### Nivel 4\n\nTexto _asi_ y **a *b** c*.\n\n"
@@ -528,6 +573,16 @@ class Extractor(Caso):
         cuerpo = sin_comentarios(md)
         self.assertNotIn("Page 2 of 4", cuerpo)
         self.assertNotIn("Manual paso a paso", cuerpo)
+
+    def test_E17_el_reporte_lista_cada_renglon_de_codigo_reunido(self):
+        pdf = self.tmp / "manual.pdf"
+        pdf_con_codigo_partido(pdf)
+        rc, out, carpeta = self.extraer(pdf)
+        self.assertEqual(rc, 0, out)
+        reporte = self.leer(carpeta, "reporte.md")
+        total = int(re.search(r"Renglones de código reunidos \([^)]*\): (\d+)", reporte).group(1))
+        lista = reporte.split("## Renglones de código reunidos")[1]
+        self.assertEqual(len(re.findall(r"^- p\.2: `…", lista, flags=re.M)), total)
 
     def test_ejemplo_ida_y_vuelta(self):
         pdf = self.tmp / "ejemplo.pdf"

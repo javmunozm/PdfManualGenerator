@@ -123,6 +123,13 @@ class Checker:
         except UnicodeDecodeError:
             self.error(1, "el archivo no está en UTF-8: guardarlo como UTF-8")
             return
+        for n, ln in enumerate(text.split("\n"), 1):      # NUL y similares: símbolos sin mapa
+            raros = sorted({c for c in ln if c == "�" or (ord(c) < 32 and c not in "\t\r")})
+            if raros:
+                self.error(n, "carácter de control o ilegible ("
+                           + ", ".join(f"U+{ord(c):04X}" for c in raros)
+                           + "): era un símbolo sin mapa de caracteres en el original; "
+                             "reemplazarlo por el símbolo real")
         cfg, _ = manual.parse_front_matter(text)
         start = cfg.pop("_body_line", 0)
         written = {ln.split(":", 1)[0].strip().lower()        # lo que la cabecera trae escrito

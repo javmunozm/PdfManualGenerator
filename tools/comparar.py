@@ -119,7 +119,10 @@ def pdf_lines(doc, skip_pages=()):
         for b in page.get_text("dict")["blocks"]:
             last = None                                   # une los tramos de un mismo renglón
             for ln in b.get("lines", []):
-                text = extraer.norm("".join(s["text"] for s in ln["spans"]))
+                # ZapfDingbats solo dibuja símbolos (flechas, viñetas): su texto son letras
+                # sin relación con lo que se ve, así que no cuenta como palabras.
+                text = extraer.norm("".join(s["text"] for s in ln["spans"]
+                                            if "Dingbats" not in s["font"]))
                 if not text:
                     continue
                 size = max(s["size"] for s in ln["spans"])
@@ -164,19 +167,68 @@ def strip_heading_numbers(body, doc):
     return out
 
 
-def to_tokens(lines, other_vocab):
+def to_tokens(lines, other_vocab, soft=False):
     """Tokens con su ubicación. Une las palabras cortadas con guion al final del renglón
-    cuando la palabra completa existe en el otro documento."""
+    cuando la palabra completa existe en el otro documento.
+
+    Con soft=True (PDF generado) también une una palabra partida sin guion porque no
+    cabía en su celda: solo si la palabra completa existe en el otro documento y alguno
+    de los dos trozos no existe allí. Una palabra muy larga puede quedar en tres o más
+    trozos: los intermedios se unen mientras formen el comienzo de una palabra larga."""
+    starts = ({w[:k] for w in other_vocab if len(w) >= 16 for k in range(8, len(w))}
+              if soft else set())
     toks, locs, cut = [], [], False              # cut: el renglón anterior terminó en guion
     for text, where in lines:
         row = tokens(text)
         if cut and row and toks and text.lstrip()[:1].islower() and toks[-1] + row[0] in other_vocab:
             toks[-1] += row[0]
             row = row[1:]
+        elif soft and row and toks and (
+                (toks[-1] + row[0] in other_vocab
+                 and (toks[-1] not in other_vocab or row[0] not in other_vocab))
+                or (toks[-1] + row[0] in starts and toks[-1] not in other_vocab)):
+            toks[-1] += row[0]
+            row = row[1:]
         toks += row
         locs += [where] * len(row)
         end = text.rstrip()
         cut = bool(tokens(text)) and end.endswith("-") and end[-2:-1].isalpha()
+    return toks, locs
+
+
+def table_headers(text):
+    """Encabezados de las tablas de un .md (la fila anterior a |---|), como tokens."""
+    heads, fence, lines = set(), False, text.splitlines()
+    for a, b in zip(lines, lines[1:]):
+        a, b = a.strip(), b.strip()
+        if a.startswith("```"):
+            fence = not fence
+        if fence or not (a.startswith("|") and b.startswith("|")):
+            continue
+        if all(re.fullmatch(r":?-{2,}:?", c.strip()) for c in re.split(r"(?<!\\)\|", b.strip("|"))):
+            cells = [c.strip() for c in re.split(r"(?<!\\)\|", a.strip("|"))]
+            head = tuple(tokens(LINK.sub(r"\1", re.sub(r"<br\s*/?>", " ", " ".join(cells), flags=re.I))))
+            if head:
+                heads.add(head)
+    return heads
+
+
+def drop_repeated_headers(toks, locs, heads, src_t):
+    """Quita del PDF generado los encabezados de tabla que manual.py repite cuando la tabla
+    sigue en otra página: solo apariciones al inicio de una página, y solo las que el
+    origen no tiene."""
+    def count(ts, h):
+        n = len(h)
+        return sum(1 for i in range(len(ts) - n + 1) if ts[i] == h[0] and tuple(ts[i:i + n]) == h)
+
+    for h in sorted(heads, key=len, reverse=True):
+        surplus, n = count(toks, h) - count(src_t, h), len(h)
+        i = len(toks) - n
+        while surplus > 0 and i > 0:
+            if toks[i] == h[0] and tuple(toks[i:i + n]) == h and locs[i] != locs[i - 1]:
+                del toks[i:i + n], locs[i:i + n]
+                surplus -= 1
+            i -= 1
     return toks, locs
 
 
@@ -286,8 +338,11 @@ def main():
     raw_src = {t for line, _ in src_body for t in tokens(line)}
     raw_out = {t for line, _ in out_body for t in tokens(line)}
     src_t, src_l = to_tokens(src_body, raw_out)
-    out_t, _ = to_tokens(out_body, raw_src)
+    out_t, out_l = to_tokens(out_body, raw_src, soft=True)
     src_t, src_l = drop_phrases(src_t, src_l, a.ignorar)
+    if kind != ".pdf":
+        heads = table_headers(src_path.read_text(encoding="utf-8-sig"))
+        out_t, out_l = drop_repeated_headers(out_t, out_l, heads, src_t)
     cover_t = Counter(t for line in out_cover for t in tokens(line))
     missing, numbers, extra, order = compare(src_t, src_l, out_t, cover_t)
 

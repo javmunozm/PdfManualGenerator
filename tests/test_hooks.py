@@ -44,9 +44,64 @@ class Sources(unittest.TestCase):
     def test_lo_demas_no_se_toca(self):
         self.assertIsNone(decision("Read", {"file_path": str(RAIZ / "ejemplo.md")}))
         self.assertIsNone(decision("Write", {"file_path": str(RAIZ / "documentos" / "x" / "x.md")}))
-        self.assertIsNone(decision("Glob", {"pattern": "**/*.md"}))
+        self.assertIsNone(decision("Glob", {"pattern": "docs/**/*.md"}))   # **/*.md: ver H6
         self.assertIsNone(decision("Bash", {"command": "python manual.py ejemplo.md"}))
         self.assertIsNone(decision("Bash", {"command": "pip install resources open-sources"}))
+
+
+class SinNombrarlo(unittest.TestCase):
+    """H6: lo que llega a sources/ sin escribir su nombre."""
+
+    def test_glob_que_puede_entrar_a_sources_pide_permiso(self):
+        for patron in ("**/*.pdf", "**/*", "**", "s*/*.md", "*/*", "sourc*/**"):
+            self.assertEqual(decision("Glob", {"pattern": patron}), "ask", patron)
+        self.assertEqual(decision("Glob", {"pattern": "**/*.md", "path": str(RAIZ)}), "ask")
+        self.assertEqual(decision("Glob", {"pattern": "**/*.md", "path": str(RAIZ.parent)}), "ask")
+
+    def test_glob_acotado_a_otra_carpeta_no_se_toca(self):
+        for patron in ("docs/**/*.md", "tools/*.py", "*.md", ".claude/**/*", "tests/**"):
+            self.assertIsNone(decision("Glob", {"pattern": patron}), patron)
+        self.assertIsNone(decision("Glob", {"pattern": "**/*.md", "path": str(RAIZ / "docs")}))
+
+    def test_listado_o_busqueda_recursiva_desde_la_raiz_pide_permiso(self):
+        for tool, cmd in [("PowerShell", "Get-ChildItem -Recurse -Name"),
+                          ("PowerShell", "gci . -r | Select-Object FullName"),
+                          ("PowerShell", f'Get-ChildItem -Path "{RAIZ}" -Recurse -Filter *.pdf'),
+                          ("PowerShell", "cd ..; ls -Recurse"),
+                          ("PowerShell", "tree /f"),
+                          ("Bash", "ls -R ."), ("Bash", "ls -laR"), ("Bash", "find . -name '*.pdf'"),
+                          ("Bash", "grep -rn MongoDB ."), ("Bash", "rg --no-ignore MongoDB"),
+                          ("Bash", "cd docs && cd .. && find . -type f")]:
+            self.assertEqual(decision(tool, {"command": cmd}), "ask", cmd)
+
+    def test_comodin_que_alcanza_sources_pide_permiso(self):
+        self.assertEqual(decision("Bash", {"command": "cat sourc*/*/*.md"}), "ask")
+        self.assertEqual(decision("PowerShell", {"command": "Get-Content s*\\*.md"}), "ask")
+        self.assertEqual(decision("Bash", {"command": "head -5 */*.md"}), "ask")
+
+    def test_encargo_a_un_subagente_que_nombra_sources_pide_permiso(self):
+        self.assertEqual(decision("Agent", {"prompt": "lee sources/manual.pdf"}), "ask")
+        self.assertIsNone(decision("Agent", {"prompt": "traduce documentos/x/partes/01.md"}))
+
+    def test_comandos_habituales_no_se_tocan(self):
+        for tool, cmd in [("PowerShell", "Get-ChildItem -Name"),
+                          ("PowerShell", "Get-ChildItem .claude -Recurse -Name"),
+                          ("PowerShell", "Get-ChildItem extracted, documentos, output -ErrorAction SilentlyContinue"),
+                          ("PowerShell", "cd tools; Get-ChildItem -Recurse"),
+                          ("PowerShell", "Remove-Item output\\*.png"),
+                          ("PowerShell", "python -m unittest discover tests 2>&1 | Select-Object -Last 3"),
+                          ("PowerShell", "git status --short --ignored"),
+                          ("Bash", "ls -R tools"), ("Bash", "ls -r"), ("Bash", "find tests -name '*.py'"),
+                          ("Bash", "grep -rn TODO tools docs"), ("Bash", "rg MongoDB"),
+                          ("Bash", "grep -n '^#' documentos/x/x.md"),
+                          ("Bash", "python tools/costo.py documentos/x/x.md")]:
+            self.assertIsNone(decision(tool, {"command": cmd}), cmd)
+
+    def test_grep_sin_ruta_depende_de_que_sources_este_en_gitignore(self):
+        # ripgrep (la herramienta Grep) no entra a carpetas ignoradas: por eso el hook no
+        # objeta un Grep sin ruta. Si sources/ sale de .gitignore, esa protección se pierde.
+        ignorados = (RAIZ / ".gitignore").read_text(encoding="utf-8").splitlines()
+        self.assertIn("sources/", [ln.strip() for ln in ignorados])
 
 
 class Originales(unittest.TestCase):
