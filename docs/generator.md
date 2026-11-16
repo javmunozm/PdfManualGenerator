@@ -32,7 +32,9 @@ python manual.py documentos/<nombre>/<nombre>.md -o output/<nombre>.pdf
 
 La terminal muestra la ruta y el peso del PDF, y un «Aviso l.N» por cada cosa que se
 imprimió tal cual o no se imprimió (imagen que no existe, bloque de código sin cerrar,
-texto después de `-->`, carácter sin glifo). Con `--estricto` esos avisos terminan en
+texto después de `-->`, carácter sin glifo). En la portada, un título o subtítulo largo
+se imprime con letra más chica (hasta la mitad) para que quepa en la banda; si ni así
+cabe, se recorta con «…» y hay un «Aviso portada». Con `--estricto` esos avisos terminan en
 código 1. Código 2: no se generó (cabecera inválida, archivo inexistente). Crea la carpeta
 de salida si no existe. Requisitos: `pip install -r requirements.txt` y la carpeta `fonts/`.
 

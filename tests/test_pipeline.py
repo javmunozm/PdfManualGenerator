@@ -406,6 +406,45 @@ class Generador(Caso):
         rc, out = run("tools/comparar.py", md, pdf)
         self.assertNotIn("Plantilla", out)                             # el pie recortado se reconoce
 
+    def portada(self, nombre, veces, *extra):
+        """Genera un manual con un título de `veces` repeticiones; devuelve (rc, salida, tramos
+        de la portada como (tamaño, y0, y1, texto))."""
+        md = self.md(nombre, "# Uno\n\nTexto.\n", cabecera=(
+            "---\ntitulo: " + "Titulo largo de prueba " * veces + "\nsubtitulo: "
+            + "Subtitulo tambien largo " * min(veces, 12)
+            + "\ninstitucion: Instituto de prueba\nautor: Ada\nindice: no\n---\n\n"))
+        pdf = self.tmp / f"{nombre}.pdf"
+        rc, out = run("manual.py", md, "-o", pdf, *extra)
+        with pymupdf.open(pdf) as doc:
+            tramos = [(s["size"], s["bbox"][1], s["bbox"][3], s["text"])
+                      for b in doc[0].get_text("dict")["blocks"] for ln in b.get("lines", [])
+                      for s in ln["spans"] if s["text"].strip()]
+            alto = doc[0].rect.height
+        return rc, out, tramos, alto
+
+    def test_G11_un_titulo_largo_en_la_portada_se_achica_y_no_sale_de_su_zona(self):
+        rc, out, tramos, alto = self.portada("portada", 14, "--estricto")
+        self.assertEqual(rc, 0, out)                                   # cabe entero: sin avisos
+        texto = " ".join(t[3] for t in tramos)
+        self.assertEqual(texto.count("Titulo"), 14)
+        self.assertEqual(texto.count("Subtitulo"), 12)
+        institucion = next(t for t in tramos if "INSTITUTO" in t[3])
+        for size, y0, y1, t in tramos:
+            self.assertGreaterEqual(y0, 0, t)                          # nada sale de la página
+            if t is not institucion[3] and y1 < alto * 0.45:           # título y subtítulo
+                self.assertGreater(y0, institucion[2], t)              # no se montan sobre la institución
+        self.assertLess(max(t[0] for t in tramos), 32)                 # la letra se achicó
+
+    def test_G11_un_titulo_que_no_cabe_en_la_portada_se_recorta_con_aviso(self):
+        rc, out, tramos, alto = self.portada("enorme", 80, "--estricto")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("portada", out)
+        self.assertIn("…", " ".join(t[3] for t in tramos))
+        institucion = next(t for t in tramos if "INSTITUTO" in t[3])
+        for size, y0, y1, t in tramos:
+            if t is not institucion[3] and y1 < alto * 0.45:
+                self.assertGreater(y0, institucion[2], t)
+
     def test_G13_fecha_vacia_usa_la_de_hoy_y_una_seccion_sin_capitulo_no_se_numera(self):
         _, pdf = self.generar("g13", "## Seccion suelta\n\nTexto.\n\n# Capitulo\n\n## Otra\n\nMas.\n",
                               cabecera="---\ntitulo: P\nfecha:\n---\n\n")
@@ -816,6 +855,31 @@ class Extractor(Caso):
         self.assertIn("Cobertura 100%", reporte)                       # 10³ cuenta como 103
         self.assertIn("sin carácter propio", reporte)                  # «crit» no existe como subíndice
         self.assertEqual(rc, 1, out)
+
+    def test_E4_tabla_con_bordes_completos_conserva_sus_celdas_y_los_indices(self):
+        # Letra de 10 pt: el espacio mide menos de 3 pt y Table.extract() de PyMuPDF pega las
+        # palabras («sincambios»); la tabla se descartaba y quedaba como un párrafo.
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
+        st = getSampleStyleSheet()["Normal"]
+        filas = (("Magnitud", "Valor medido"),
+                 ("Volumen", "10<super>3</super> m<super>2</super>"),
+                 ("Agua", "H<sub>2</sub>O"),
+                 ("Texto", "sin cambios | con barra"))
+        tabla = Table([[Paragraph(x, st) for x in f] for f in filas], colWidths=[150, 200])
+        tabla.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.5, colors.black)]))
+        pdf = self.tmp / "bordes.pdf"
+        SimpleDocTemplate(str(pdf)).build([Paragraph("Tabla con bordes completos.", st), tabla])
+        rc, out, carpeta = self.extraer(pdf)
+        md = self.leer(carpeta)
+        for fila in ("| Magnitud | Valor medido |", "| Volumen | 10³ m² |", "| Agua | H₂O |",
+                     "| Texto | sin cambios \\| con barra |"):
+            self.assertIn(fila, md)
+        for relleno in ("unspecified", "anonymous"):                   # E14: metadatos sin valor
+            self.assertNotIn(relleno, md)
+        self.assertIn("Cobertura 100%", self.leer(carpeta, "reporte.md"))
+        self.assertEqual(rc, 0, out)
 
     def test_E5_word_conserva_enlaces_numeracion_y_celdas_combinadas(self):
         import docx

@@ -352,7 +352,7 @@ traducido al inglés, 157 páginas generadas, `comparar.py --estricto` en códig
 ## 13. Fases 4, 5 y 6 y errores nuevos (15/11/2026)
 
 Revisión completa del sistema y cierre de lo pendiente. Esta sección reemplaza a la tabla
-1.1. Estado al 16/11/2026: 99 pruebas (`python -m unittest discover tests`), todas con
+1.1. Estado al 16/11/2026: 102 pruebas (`python -m unittest discover tests`), todas con
 archivos propios, y `ejemplo.pdf` regenerado con `comparar.py --estricto` en código 0.
 Los puntos resueltos con prueba llevan su código en el nombre (`test_G5_…`, `test_E11_…`,
 `test_N2_…`) o en un comentario de la prueba (E13). G12, N8 y los cambios de
@@ -382,7 +382,7 @@ documentación (N5, N6) no tienen una prueba con su código.
 | G8 | **Resuelto.** Avisos con línea para imagen inexistente, bloque o comentario sin cerrar, texto tras `-->`, `---`, título de nivel 4 y caracteres sin glifo; `--estricto` termina en 1. |
 | G9 | **Resuelto.** Un enlace en un título queda como texto en el marcador y el índice. |
 | G10 | **Resuelto.** Crea la carpeta de salida; `color` o `dpi_imagenes` inválidos dan un mensaje y código 2. |
-| G11 | **Resuelto.** Título, curso, capítulo y datos de portada se recortan con «…». Pendiente menor: un título muy largo en la portada se acomoda en varios renglones y puede subir más allá de la banda. |
+| G11 | **Resuelto.** Título, curso, capítulo y datos de portada se recortan con «…». El título de la portada (16/11/2026): antes subía sin límite, se montaba sobre la institución y lo que pasaba el borde de la página se perdía sin aviso (con 14 repeticiones de una frase quedaban 6). Ahora título y subtítulo se achican hasta la mitad para caber entre la base de la banda y la institución; si ni así caben, se recortan con «…» y hay un aviso, que con `--estricto` termina en 1. Pruebas `test_G11_un_titulo_*`. |
 | G12 | **Resuelto.** Un título seguido de una figura pasa junto con ella a la página siguiente. |
 | G13 | **Resuelto.** `fecha:` vacía usa la de hoy; una sección sin capítulo sale sin número. |
 | G17 | **Resuelto.** Listas anidadas por sangría (2 espacios o más). |
@@ -391,7 +391,8 @@ documentación (N5, N6) no tienen una prueba con su código.
 
 | ID | Estado |
 |---|---|
-| E4 | **Resuelto para texto corrido y tablas de líneas horizontales.** Superíndices y subíndices pasan a sus caracteres propios (`10³`, `H₂O`); la cobertura los cuenta bien. Lo que no tiene carácter propio queda en línea y se lista en el reporte. Pendiente: las tablas con bordes completos (las arma PyMuPDF) siguen aplanándolos. |
+| E4 | **Resuelto**, también en tablas con bordes completos (16/11/2026). Superíndices y subíndices pasan a sus caracteres propios (`10³`, `H₂O`); la cobertura los cuenta bien. Lo que no tiene carácter propio queda en línea y se lista en el reporte. Al probar las tablas con bordes apareció un error mayor (**E19**, abajo). |
+| E19 | **Nuevo, Alto. Resuelto (16/11/2026).** Una tabla con bordes completos y letra de 10 pt o menos se perdía como tabla: quedaba como un párrafo con todas las celdas seguidas, y el reporte decía «Cobertura 100%; sin observaciones». Causa: `Table.extract()` de PyMuPDF une las palabras cuando el espacio mide menos de 3 pt («sin cambios» → «sincambios»), `clean_table` veía palabras distintas a las de la zona y descartaba la tabla. Además se descartaba si el renglón de arriba rozaba el borde. Ahora el texto de cada celda se lee de sus tramos (`table_rows`, con `cell_md`, igual que en las tablas de líneas horizontales): conserva negrita, cursiva y código, y un renglón que solo roza el borde no cuenta. Cambio visible: un salto de renglón dentro de una celda sale como espacio, no como `<br>`. Prueba `test_E4_tabla_con_bordes_*`. No se comprobó con un PDF real: las extracciones ya hechas son anteriores y no se rehicieron. |
 | E5 | **Resuelto.** Hipervínculos de Word con su dirección, listas numeradas con su número y nivel, celdas combinadas una sola vez. |
 | E6 | **Resuelto.** Texto y CSV en UTF-8, UTF-16 o cp1252; CSV de una columna; salto dentro de un campo. |
 | E8 | **Resuelto.** Un corte con guion se une solo si la palabra unida existe en otra parte del documento; si no, conserva el guion y lo lista. La cobertura usa la misma regla. |
@@ -399,7 +400,7 @@ documentación (N5, N6) no tienen una prueba con su código.
 | E11 | **Resuelto.** El enlace va en la aparición que corresponde a su posición, sin la puntuación final y aunque el texto tenga formato. Lo que cae dentro de código en línea sigue yendo a la línea «Enlaces:». |
 | E12 | **Resuelto.** Hojas y diapositivas ocultas marcadas `(oculta)`; porcentajes con signo y fechas sin hora; límite de 2.000 filas por hoja o CSV, declarado en el reporte (`--filas 0` = todas). |
 | E13 | **Resuelto.** Solo figuran como pendientes las figuras sin pie; lo informativo va aparte; código de salida 0, 1 (con pendientes) o 2. |
-| E14 | **Resuelto.** Un título de metadatos sin valor se reemplaza por el texto más grande de la portada (o el nombre del archivo). |
+| E14 | **Resuelto.** Un título de metadatos sin valor se reemplaza por el texto más grande de la portada (o el nombre del archivo). Desde el 16/11/2026 tampoco pasan a la cabecera un `subtitulo` o `autor` de relleno («(unspecified)», «(anonymous)»). |
 | E15 | **Resuelto.** Tokens con caracteres / 3,5; archivo protegido o dañado: mensaje de una línea y código 2. No se cambió la detección del índice sin puntos guía. |
 | E18 | **Resuelto.** NUL y U+FFFD quedan como `[SIMBOLO?]`, con su página en el reporte; `validar.py` y `preparar.py` lo tratan como pendiente. |
 

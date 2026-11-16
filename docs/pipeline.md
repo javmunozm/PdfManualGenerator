@@ -69,7 +69,7 @@ rótulos) y, con un `.md` de origen, los títulos, las figuras y los enlaces.
 ## 3. Bibliotecas instaladas
 
 Python 3.14.10 en Windows 11. Versiones instaladas al 12/11/2026, tras reinstalar el
-sistema (`pip install -r requirements.txt` instala las seis primeras; las 99 pruebas
+sistema (`pip install -r requirements.txt` instala las seis primeras; las 102 pruebas
 pasan con estas versiones al 15/11/2026):
 
 | Biblioteca | Instalada | Mínima (`requirements.txt`) | La usa | Para qué |

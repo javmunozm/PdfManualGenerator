@@ -46,7 +46,7 @@ BAND = 0.15     # franja donde se busca texto repetido en la misma posición
 COL_GAP = 9     # hueco mínimo (pt) entre columnas; un espacio normal mide menos
 MARK = "[SIMBOLO?]"   # símbolo sin mapa de caracteres en el original (era NUL en el texto)
 MAX_ROWS = 2000       # filas por hoja o CSV; 0 = todas (opción --filas)
-JUNK_TITLE = re.compile(r"^(\(?anonymous\)?|untitled|unspecified|sin t[ií]tulo|microsoft word - .*|"
+JUNK_TITLE = re.compile(r"^(\(?anonymous\)?|untitled|\(?unspecified\)?|sin t[ií]tulo|microsoft word - .*|"
                         r"document\d*|documento\d*|presentaci[oó]n\d*|presentation\d*|"
                         r".*\.(docx?|pptx?|xlsx?|pdf|indd|tex|dvi|odt))$", re.I)
 # Superíndices y subíndices que existen como caracteres propios
@@ -505,14 +505,14 @@ def join_tall_rows(page, segs, x0, x1):
     return out
 
 
-def cell_md(page, rect):
+def cell_md(page, rect, lost=None):
     parts = []
     for b in page.get_text("dict", clip=rect)["blocks"]:
         for ln in b.get("lines", []):
             spans = [s for s in ln["spans"] if rect.contains(pymupdf.Point(
                 (s["bbox"][0] + s["bbox"][2]) / 2, (s["bbox"][1] + s["bbox"][3]) / 2))]
             if spans:
-                parts.append(span_md(fix_scripts(spans)).strip())
+                parts.append(span_md(fix_scripts(spans, lost)).strip())
     return norm(" ".join(parts))
 
 
@@ -587,19 +587,21 @@ def page_to_md(doc, page, ctx):
 
     # Tablas con bordes completos; se descartan detecciones que cortan palabras
     # (por ejemplo, el fondo de color del código en línea)
-    tables = [t for t in page.find_tables().tables
-              if not any(pymupdf.Rect(t.bbox).intersects(r) for r in t_rects)
-              and clean_table(page, t)
-              and (t.row_count >= 2 or (t.col_count == 1 and t.bbox[3] - t.bbox[1] > 30))]
-    t_rects += [pymupdf.Rect(t.bbox) for t in tables]
-    for t in tables:
-        rows = t.extract()
+    tables = []
+    for t in page.find_tables().tables:
+        if any(pymupdf.Rect(t.bbox).intersects(r) for r in t_rects):
+            continue
+        rows = table_rows(page, t, ctx["scripts_lost"])
+        if clean_table(page, t, rows) and \
+                (t.row_count >= 2 or (t.col_count == 1 and t.bbox[3] - t.bbox[1] > 30)):
+            tables.append((t, rows))
+    t_rects += [pymupdf.Rect(t.bbox) for t, _ in tables]
+    for t, rows in tables:
         if len(rows) == 1 and len(rows[0]) == 1:  # caja de un solo cuadro
-            txt = norm(rows[0][0] or "")
-            if txt:
-                items.append((t.bbox[1], t.bbox[0], "> " + txt))
+            if rows[0][0]:
+                items.append((t.bbox[1], t.bbox[0], "> " + rows[0][0]))
         else:
-            items.append((t.bbox[1], t.bbox[0], t.to_markdown().strip()))
+            items.append((t.bbox[1], t.bbox[0], md_table(rows)))
 
     def in_table(r):
         c = pymupdf.Rect(r)
@@ -782,21 +784,31 @@ def merge_blocks(blocks):
     return "\n\n".join(out)
 
 
-def clean_table(page, t):
+def table_rows(page, t, lost=None):
+    """Texto de cada celda de una tabla con bordes, leído de sus tramos. `Table.extract()`
+    de PyMuPDF pega las palabras cuando el espacio mide menos de 3 pt (letra de 10 pt o
+    menos: «sin cambios» queda «sincambios») y aplana superíndices y subíndices (E4)."""
+    return [[cell_md(page, pymupdf.Rect(c), lost) if c else "" for c in row.cells]
+            for row in t.rows]
+
+
+def clean_table(page, t, rows):
     """Una tabla es válida si no corta palabras y contiene todo el texto de su zona."""
     r = pymupdf.Rect(t.bbox)
     real = set(words(" ".join(  # palabras completas cuyo centro cae en la tabla
         w[4] for w in page.get_text("words")
         if r.contains(pymupdf.Point((w[0] + w[2]) / 2, (w[1] + w[3]) / 2)))))
-    cells = set(words(" ".join(c or "" for row in t.extract() for c in row)))
+    cells = set(words(" ".join(c for row in rows for c in row)))
     if cells != real or t.row_count == 0:
         return False
     # En una tabla real el texto queda dentro; si un renglón la atraviesa, es un
-    # párrafo con fragmentos de código resaltados, no una tabla.
+    # párrafo con fragmentos de código resaltados, no una tabla. El renglón de arriba o de
+    # abajo, que apenas roza el borde (su caja incluye el espacio bajo las letras), no cuenta.
     for b in page.get_text("dict")["blocks"]:  # sin recorte: renglones completos
         for ln in b.get("lines", []):
             lb = pymupdf.Rect(ln["bbox"])
-            if lb.intersects(r) and (lb.x0 < r.x0 - 4 or lb.x1 > r.x1 + 4):
+            inside = min(lb.y1, r.y1) - max(lb.y0, r.y0)
+            if inside > 0.3 * lb.height and (lb.x0 < r.x0 - 4 or lb.x1 > r.x1 + 4):
                 return False
     return True
 
@@ -939,9 +951,11 @@ def extract(pdf_path, out_dir):
     numbered = sum(bool(NUM_HEAD.match(h)) for h in ctx["headings"])
     front = {
         "titulo": titulo,
-        "subtitulo": meta.get("subject", ""),
-        "autor": meta.get("author", ""),
-        "palabras_clave": meta.get("keywords", ""),
+        # «(unspecified)» y «(anonymous)» son relleno del programa que creó el PDF (E14)
+        **{k: v for k, v in (("subtitulo", (meta.get("subject") or "").strip()),
+                             ("autor", (meta.get("author") or "").strip()),
+                             ("palabras_clave", (meta.get("keywords") or "").strip()))
+           if not JUNK_TITLE.match(v)},
         "tamano": "carta" if abs(doc[0].rect.width - 612) < 5 else "A4",
         "numerar": "no" if numbered > len(ctx["headings"]) / 2 else "si",
         "fuente": pdf_path.name,

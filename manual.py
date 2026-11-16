@@ -841,12 +841,18 @@ class _Rule(Flowable):
 # ---------------------------------------------------------------------------
 # Documento: portada, encabezado, pie, índice y marcadores
 # ---------------------------------------------------------------------------
+COVER_CUT = ("portada: el título y el subtítulo no caben ni con la letra más chica; "
+             "se recortaron con «…». Acortarlos en la cabecera.")
+
+
+
 class ManualDoc(BaseDocTemplate):
     def __init__(self, filename, cfg, **kw):
         super().__init__(filename, **kw)
         self.cfg = cfg
         self.primary = colors.HexColor(cfg["color"])
         self.t = textos(cfg)
+        self.warnings = []
         self.page_chapters = {}
         self._last_level = -1
         frame = Frame(self.leftMargin, self.bottomMargin, self.width, self.height, id="f")
@@ -888,21 +894,47 @@ class ManualDoc(BaseDocTemplate):
 
         x, w = 2.5 * cm, W - 5 * cm
         y = H - band_h + 2.2 * cm
+        top = H - 2.5 * cm
         if cfg["institucion"]:
             st = ParagraphStyle("ins", fontName="Helvetica-Bold", fontSize=10,
                                 leading=13, textColor=colors.HexColor("#D6E4F0"))
             p = Paragraph(with_fallback(escape(cfg["institucion"].upper())), st)
             _, ph = p.wrap(w, H)
-            p.drawOn(c, x, H - 2.5 * cm - ph)
+            p.drawOn(c, x, top - ph)
+            top -= ph + 0.5 * cm
 
-        blocks = []
-        blocks.append(Paragraph(with_fallback(escape(cfg["titulo"])), ParagraphStyle(
-            "ct", fontName="Helvetica-Bold", fontSize=32, leading=38,
-            textColor=colors.white)))
-        if cfg["subtitulo"]:
-            blocks.append(Paragraph(with_fallback(escape(cfg["subtitulo"])), ParagraphStyle(
-                "cs", fontName="Helvetica", fontSize=15, leading=20,
-                textColor=colors.HexColor("#E8EEF4"))))
+        # Título y subtítulo ocupan la banda, entre su base y la institución. Si no caben,
+        # se achica la letra (hasta la mitad); si ni así, se recortan con aviso (G11):
+        # antes subían sin límite y lo que pasaba el borde de la página se perdía.
+        def cover_blocks(scale, title, sub):
+            out = [Paragraph(with_fallback(escape(title)), ParagraphStyle(
+                "ct", fontName="Helvetica-Bold", fontSize=32 * scale, leading=38 * scale,
+                textColor=colors.white))]
+            if sub:
+                size = max(15 * scale, 10)
+                out.append(Paragraph(with_fallback(escape(sub)), ParagraphStyle(
+                    "cs", fontName="Helvetica", fontSize=size, leading=size * 4 / 3,
+                    textColor=colors.HexColor("#E8EEF4"))))
+            return out
+
+        def fits(blocks):
+            return sum(p.wrap(w, H)[1] + 10 for p in blocks) - 10 <= top - y
+
+        title, sub, scale = cfg["titulo"], cfg["subtitulo"], 1.0
+        blocks = cover_blocks(scale, title, sub)
+        while not fits(blocks) and scale > 0.5:
+            scale = max(0.5, scale - 0.05)
+            blocks = cover_blocks(scale, title, sub)
+        cut = False
+        while not fits(blocks) and (" " in title or " " in sub):
+            if len(sub) > len(title) and " " in sub or " " not in title:   # se recorta el más largo
+                sub = sub.rstrip("…").rsplit(" ", 1)[0] + "…"
+            else:
+                title = title.rstrip("…").rsplit(" ", 1)[0] + "…"
+            cut = True
+            blocks = cover_blocks(scale, title, sub)
+        if cut and COVER_CUT not in self.warnings:
+            self.warnings.append(COVER_CUT)
         for p in reversed(blocks):
             _, ph = p.wrap(w, H)
             p.drawOn(c, x, y)
@@ -1024,8 +1056,8 @@ def build_pdf(md_path, out_path):
     story += content
 
     doc.multiBuild(story, canvasmaker=make_canvas(doc))
-    build_pdf.warnings = list(builder.warnings)
-    for w in builder.warnings:
+    build_pdf.warnings = list(builder.warnings) + doc.warnings
+    for w in build_pdf.warnings:
         print(f"Aviso {w}", file=sys.stderr)
     return out_path
 
