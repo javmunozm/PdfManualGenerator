@@ -18,7 +18,6 @@ from xml.sax.saxutils import escape
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import manual  # noqa: E402  (mismas reglas que el generador)
-from reportlab.pdfbase import pdfmetrics  # noqa: E402
 
 for _s in (sys.stdout, sys.stderr):
     if hasattr(_s, "reconfigure"):
@@ -27,32 +26,11 @@ for _s in (sys.stdout, sys.stderr):
 IMG = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 IMG_OK = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff"}
 YES_NO = {"si", "sí", "yes", "true", "1", "no", "false", "0"}
-BULLET = re.compile(r"(\s*)[-*+]\s+(.*)")
-NUMBER = re.compile(r"(\s*)(\d+)[.)]\s+(.*)")
-
-
-def encodings():
-    font = pdfmetrics.getFont("Helvetica")
-    return [font.encName] + [s.encName for s in font.substitutionFonts]
-
-
-def has_glyph(ch, encs, cache={}):
-    if ch not in cache:
-        cache[ch] = False
-        for enc in encs:
-            try:
-                ch.encode(enc)
-                cache[ch] = True
-                break
-            except (UnicodeError, LookupError):
-                pass
-    return cache[ch]
 
 
 class Checker:
     def __init__(self, path):
         self.path, self.found, self.no_glyph = Path(path), [], {}
-        self.encs = encodings()
 
     def error(self, n, msg):
         self.found.append((0, n, "error", msg))
@@ -63,7 +41,7 @@ class Checker:
     def glyphs(self, text, n):
         for ch in text:
             if ord(ch) > 126 and not ch.isspace() and ch not in self.no_glyph \
-                    and not has_glyph(ch, self.encs):
+                    and not manual.has_glyph(ch):      # ni en la fuente normal ni en fonts/
                 self.no_glyph[ch] = n
 
     def inline(self, text, n, in_table=False):
@@ -98,6 +76,9 @@ class Checker:
         for k in ("indice", "numerar"):
             if k in cfg and cfg[k].lower() not in YES_NO:
                 self.aviso(1, f"cabecera: {k} «{cfg[k]}» debe ser si o no")
+        if "idioma" in cfg and cfg["idioma"].strip().lower() not in manual.IDIOMAS:
+            self.aviso(1, f"cabecera: idioma «{cfg['idioma']}» desconocido (es o en); el índice, "
+                          "el pie y los rótulos saldrán en español")
         if cfg.get("logo") and not (self.path.parent / cfg["logo"]).is_file():
             self.aviso(1, f"cabecera: no existe el logo {cfg['logo']}")
         for k in ("titulo", "subtitulo", "autor", "curso", "institucion"):
@@ -130,6 +111,9 @@ class Checker:
                            + ", ".join(f"U+{ord(c):04X}" for c in raros)
                            + "): era un símbolo sin mapa de caracteres en el original; "
                              "reemplazarlo por el símbolo real")
+            if "[SIMBOLO?]" in ln:
+                self.error(n, "«[SIMBOLO?]»: símbolo que la extracción no pudo identificar; "
+                              "reemplazarlo por el que se ve en el original (una casilla: [ ])")
         cfg, _ = manual.parse_front_matter(text)
         start = cfg.pop("_body_line", 0)
         written = {ln.split(":", 1)[0].strip().lower()        # lo que la cabecera trae escrito
@@ -166,10 +150,8 @@ class Checker:
                 elif level == 1:
                     seen_h1 = True
                 elif not seen_h1 and numerar and not warned0:
-                    self.aviso(n, "sección antes del primer capítulo (#): se numerará 0.1")
+                    self.aviso(n, "sección antes del primer capítulo (#): saldrá sin número")
                     warned0 = True
-                if re.search(r"\]\(", title):
-                    self.aviso(n, "enlace en un título: queda escrito tal cual en el índice y el marcador")
                 self.inline(title, n)
                 i += 1
             elif IMG.fullmatch(st):
@@ -183,42 +165,27 @@ class Checker:
                     if not all(re.fullmatch(r":?-{2,}:?", c) for c in cells):
                         widths.add(len(cells))
                         self.inline(lines[i], i + 1, in_table=True)
-                        if max(map(len, cells)) > 2500:
-                            self.aviso(i + 1, "celda muy larga: una fila no puede ocupar más de una página")
                     i += 1
                 if len(widths) > 1:
                     self.aviso(n, "tabla con filas de distinta cantidad de celdas")
             elif st.startswith(">"):
-                size, first = 0, re.sub(r"^\s*>\s?", "", line).strip()
+                first = re.sub(r"^\s*>\s?", "", line).strip()
                 m = re.match(r"\[!(\w+)\]", first)
                 if m and m.group(1).upper() not in manual.CALLOUTS:
                     self.aviso(n, f"tipo de cuadro [!{m.group(1)}] desconocido: sale como cita gris")
                 while i < len(lines) and lines[i].strip().startswith(">"):
-                    size += len(lines[i])
                     self.inline(re.sub(r"^\s*>\s?(\[!\w+\])?", "", lines[i]), i + 1)
                     i += 1
-                if size > 3500:
-                    self.aviso(n, "cuadro o cita muy largo: no puede ocupar más de una página")
-            elif BULLET.match(line) or NUMBER.match(line):
-                ordered = bool(NUMBER.match(line))
-                pat = NUMBER if ordered else BULLET
-                if ordered and int(NUMBER.match(line).group(2)) != 1:
-                    self.aviso(n, f"lista numerada que empieza en {NUMBER.match(line).group(2)}: se imprime "
-                                  "desde 1 (quitar líneas vacías entre ítems o lo que la interrumpe)")
-                nested = False
-                while i < len(lines):
-                    m = pat.match(lines[i])
+            elif manual.ITEM.match(line):
+                while i < len(lines):                     # ítems y sus renglones de continuación
+                    m = manual.ITEM.match(lines[i])
                     if m:
-                        nested |= len(m.group(1)) >= 2
-                        self.inline(m.group(m.lastindex), i + 1)
-                    elif not (lines[i].strip() and lines[i].startswith("  ")):
-                        break
-                    else:
-                        nested |= bool(BULLET.match(lines[i]) or NUMBER.match(lines[i]))
+                        self.inline(m.group(3), i + 1)
+                    elif lines[i].strip() and lines[i].startswith("  "):
                         self.inline(lines[i], i + 1)
+                    else:
+                        break
                     i += 1
-                if nested:
-                    self.aviso(n, "lista anidada: se imprime como lista simple (se pierde la jerarquía)")
             else:
                 if re.fullmatch(r"(-{3,}|\*{3,}|_{3,})", st):
                     self.aviso(n, "línea horizontal: no se admite; se imprime tal cual")

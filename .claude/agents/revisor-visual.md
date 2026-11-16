@@ -11,7 +11,8 @@ baja escala. Ábrelas con Read y busca solo problemas que se ven:
 
 - Portada: falta el título; texto que se sale de la página o se superpone.
 - Índice: entradas sin número de página; títulos que no parecen títulos.
-- Encabezado y pie: textos superpuestos; falta "Página X de Y".
+- Encabezado y pie: textos superpuestos; falta "Página X de Y" ("Page X of Y" si el
+  manual está en inglés; el índice se titula entonces "Contents").
 - Tablas: columnas ilegibles por angostas; texto cortado.
 - Recuadros de código: renglones que se salen del recuadro.
 - Figuras: faltan, están deformadas o dicen "Imagen no encontrada" o "FIGURA: describir".

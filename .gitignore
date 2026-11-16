@@ -18,3 +18,4 @@ __pycache__/
 # Temporales
 revision.png
 *.anterior.md
+.comparar.json

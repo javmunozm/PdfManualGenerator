@@ -27,6 +27,44 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/flujo.py\"",
+            "shell": "bash",
+            "timeout": 20,
+            "statusMessage": "Validando el .md..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/flujo.py\"",
+            "shell": "bash",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/flujo.py\"",
+            "shell": "bash",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   }
 }

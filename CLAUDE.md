@@ -24,15 +24,21 @@ sources/ --extraer.py--> extracted/ --preparar.py--> documentos/ --validar.py, m
 6. **Resultados a archivos, resúmenes a la terminal.** No imprimir documentos completos.
 7. **No volver a extraer lo ya extraído.** `extraer.py` lo impide salvo `--forzar`.
 8. **Un PDF no está terminado hasta que `tools/comparar.py` termina con código 0.**
+9. **El contenido sale de `sources/`.** Si el manual no parte de un archivo de `sources/`,
+   el contenido se investiga en la web según lo que el lector (el usuario u otra persona)
+   necesita aprender; no se escribe de memoria. La regla 5 habla de qué se edita, no de
+   dónde sale el contenido.
 
 ## Comandos
 
 ```
-python tools/extraer.py sources/<archivo>             # -> extracted/<nombre>/
+python tools/extraer.py sources/<archivo>             # -> extracted/<nombre>/; 1 = con pendientes
 python tools/preparar.py extracted/<nombre>           # -> documentos/<nombre>/ + pendientes
 python tools/validar.py documentos/<n>/<n>.md         # antes de generar; 0 = sin errores
-python manual.py documentos/<n>/<n>.md -o output/<n>.pdf
+python manual.py documentos/<n>/<n>.md -o output/<n>.pdf --estricto
 python tools/comparar.py <origen> output/<n>.pdf      # código 0 = correcto, 1 = falla
+python tools/revisar.py output/<n>.pdf                # hojas para el subagente revisor-visual
+python tools/estado.py                                # en qué está cada documento
 python -m unittest discover tests                     # pruebas (no usan sources/)
 ```
 
@@ -52,4 +58,9 @@ Las imágenes y la traducción van siempre a subagentes (`describir-figuras`,
 - `docs/generator.md`: cómo crear, regenerar o actualizar un documento; sintaxis.
 - `docs/auditoria.md`: errores conocidos y mejoras pendientes, con su estado.
 
-Los hooks de `.claude/hooks/` aplican las reglas 1 y 3.
+Un manual en inglés lleva `idioma: en` en la cabecera. `<origen>` de `comparar.py`: el
+original de `sources/` si es un PDF y el manual se regeneró; el `.md` de `documentos/`
+con `--estricto` si es nuevo, actualizado o traducido (detalle en `docs/pipeline.md`).
+
+Los hooks de `.claude/hooks/` aplican las reglas 1 y 3 (`guardia.py`) y avisan de un `.md`
+con errores o de un PDF desactualizado (`flujo.py`).

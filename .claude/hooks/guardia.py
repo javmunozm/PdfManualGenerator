@@ -12,6 +12,9 @@ H6  También pide confirmación lo que llega a sources/ sin nombrarlo: un Glob q
     mientras esté en .gitignore (ripgrep lo respeta; lo comprueba tests/test_hooks.py).
     Es una barrera contra descuidos, no un aislamiento: un script propio puede
     recorrer carpetas sin que el hook lo vea.
+N7  Si el hook no puede leer la llamada o falla por dentro, pide confirmación en vez de
+    dejarla pasar. Si Python no está, el hook no corre: quedan las reglas `ask` y
+    `deny` de .claude/settings.json para Read y Edit.
 
 Entrada: JSON del hook por stdin. Salida: JSON con la decisión, o nada (sin objeción).
 """
@@ -152,7 +155,8 @@ def main():
     try:
         data = json.load(sys.stdin)
     except Exception:
-        return
+        # Sin poder leer la llamada no se sabe si toca sources/: mejor preguntar (N7)
+        decidir("ask", "guardia.py no pudo leer la llamada: confirmar que no usa sources/.")
     tool = data.get("tool_name", "")
     ti = data.get("tool_input") or {}
     cwd = data.get("cwd") or os.getcwd()
@@ -209,4 +213,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as e:            # un error aquí no debe dejar pasar la llamada sin más
+        decidir("ask", f"guardia.py falló ({type(e).__name__}): confirmar que la acción no usa sources/.")

@@ -41,8 +41,20 @@ class Capitulos(Caso):
         md = self.tmp / "c.md"
         md.write_text("# Uno\n\n```\n# esto es un comentario, no un titulo\nx = 1\n```\n\n# Dos\n\nFin.\n",
                       encoding="utf-8")
-        self.assertEqual(run("tools/capitulos.py", "partir", md)[0], 0)
+        self.assertEqual(run("tools/capitulos.py", "partir", md, "--tanda", "5")[0], 0)
         self.assertEqual(len(list((self.tmp / "partes").glob("*.md"))), 2)
+
+    def test_P1_los_capitulos_chicos_van_juntos_en_una_parte(self):
+        md = self.tmp / "d.md"
+        original = "---\ntitulo: T\n---\n\n" + "".join(f"# Cap {i}\n\nTexto corto {i}.\n\n" for i in range(1, 9))
+        md.write_text(original, encoding="utf-8")
+        self.assertEqual(run("tools/capitulos.py", "partir", md)[0], 0)
+        self.assertEqual(len(list((self.tmp / "partes").glob("*.md"))), 1)     # todo cabe en una tanda
+        self.assertEqual(run("tools/capitulos.py", "partir", md, "--forzar", "--tanda", "20")[0], 0)
+        partes = len(list((self.tmp / "partes").glob("*.md")))
+        self.assertTrue(1 < partes < 9, partes)                                # varias por parte
+        self.assertEqual(run("tools/capitulos.py", "unir", md)[0], 0)
+        self.assertEqual(normal(md.read_text(encoding="utf-8")), normal(original))
 
     def test_no_pisa_partes_ya_trabajadas(self):
         md = self.copia()
@@ -64,7 +76,7 @@ class Traduccion(Caso):
         b.write_text(traducido, encoding="utf-8")
         return run("tools/comparar_traduccion.py", a, b)
 
-    BIEN = ("---\ntitulo: Guide\nnumerar: si\n---\n\n# Usage\n\nRun `python a.py` 3 times. "
+    BIEN = ("---\ntitulo: Guide\nnumerar: si\nidioma: en\n---\n\n# Usage\n\nRun `python a.py` 3 times. "
             "See [the guide](https://ejemplo.org).\n\n```\nprint('hola')  # saludo\n```\n\n"
             "| Step | Time |\n|---|---|\n| One | 2.5 s |\n\n> [!NOTA] Note\n> There are 1,250 units.\n\n"
             "- first\n- second\n\n![Flow diagram](imagenes/flujo.png)\n")
@@ -86,6 +98,7 @@ class Traduccion(Caso):
             "títulos": self.BIEN.replace("# Usage", "## Usage"),
             "imágenes": self.BIEN.replace("imagenes/flujo.png", "images/flow.png"),
             "cabecera": self.BIEN.replace("titulo: Guide", "title: Guide"),
+            "idioma: en": self.BIEN.replace("idioma: en\n", ""),      # N2: rótulos en español
         }
         for nombre, texto in casos.items():
             with self.subTest(nombre):
@@ -118,6 +131,55 @@ class Costo(Caso):
     def test_documento_inexistente(self):
         rc, out = run("tools/costo.py", "no-existe")
         self.assertEqual(rc, 2, out)
+
+
+class EstadoYRevision(Caso):
+    DOC = "---\ntitulo: Doc\nnumerar: no\n---\n\n# Uno\n\nTexto.\n"
+
+    def documento(self, nombre, cuerpo=DOC):
+        md = self.tmp / "documentos" / nombre / f"{nombre}.md"
+        md.parent.mkdir(parents=True)
+        md.write_text(cuerpo, encoding="utf-8")
+        return md, self.tmp / "output" / f"{nombre}.pdf"
+
+    def test_estado_dice_que_falta_en_cada_documento(self):
+        import os
+        ext = self.tmp / "extracted" / "nuevo"
+        ext.mkdir(parents=True)
+        (ext / "nuevo.md").write_text("# T\n\n![FIGURA: describir](assets/a.png)\n", encoding="utf-8")
+        md, pdf = self.documento("viejo")
+        self.assertEqual(run("manual.py", md, "-o", pdf)[0], 0)
+        os.utime(md, (pdf.stat().st_mtime + 60, pdf.stat().st_mtime + 60))      # editado después
+        md, pdf = self.documento("sinver")
+        self.assertEqual(run("manual.py", md, "-o", pdf)[0], 0)
+        md, pdf = self.documento("listo")
+        self.assertEqual(run("manual.py", md, "-o", pdf)[0], 0)
+        self.assertEqual(run("tools/comparar.py", md, pdf, "--estricto")[0], 0)  # deja su registro
+        self.documento("borrador")
+        rc, out = run("tools/estado.py", "--raiz", self.tmp, "--todo")
+        self.assertEqual(rc, 0, out)
+        for esperado in ("nuevo: pendientes en la extracción: 1 figuras por describir; extraído, sin preparar",
+                         "viejo: PDF desactualizado", "sinver: PDF sin verificar", "borrador: sin PDF",
+                         "listo: terminado", "5 documentos, 4 con algo pendiente"):
+            self.assertIn(esperado, out)
+        self.assertNotIn("listo", run("tools/estado.py", "--raiz", self.tmp)[1])
+
+    def test_revisar_arma_las_hojas_y_dice_que_paginas_muestra(self):
+        filas = "".join(f"| Concepto {i} | Detalle {i} |\n" for i in range(1, 9))
+        codigo = "\n".join(f"linea_{i} = calcular(valor_{i}, otro_valor_{i})" for i in range(12))
+        md, pdf = self.documento("visual", self.DOC + f"\n# Dos\n\n| A | B |\n|---|---|\n{filas}\n"
+                                                      f"# Tres\n\n```\n{codigo}\n```\n\n# Cuatro\n\nFin.\n")
+        self.assertEqual(run("manual.py", md, "-o", pdf)[0], 0)
+        rc, out = run("tools/revisar.py", pdf)
+        self.assertEqual(rc, 0, out)
+        self.assertRegex(out, r"revision\.png: p\.1 portada; p\.2 índice; p\.3 primera página")
+        self.assertRegex(out, r"revision2\.png: p\.4 la tabla con más filas; p\.5 la página con más código")
+        for nombre in ("revision.png", "revision2.png"):
+            self.assertGreater((pdf.parent / nombre).stat().st_size, 2000)
+        rc, out = run("tools/revisar.py", pdf, "--paginas", "4", "--dpi", "110")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("páginas 4 a 110 dpi", out)
+        self.assertEqual(run("tools/revisar.py", pdf, "--paginas", "99")[0], 2)
 
 
 class SkillsYAgentes(unittest.TestCase):

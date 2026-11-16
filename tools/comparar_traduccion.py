@@ -7,7 +7,8 @@ Uso:
 tools/comparar.py compara palabras y no sirve entre dos idiomas. Aquí se compara la
 estructura: títulos (niveles y orden), bloques de código y código en línea (idénticos),
 imágenes, enlaces, tablas, cuadros, listas y cifras. Si el texto traducido es mucho más
-corto que el original, avisa: puede haberse resumido.
+corto que el original, avisa: puede haberse resumido. La traducción debe declarar
+`idioma: en` en la cabecera, para que manual.py ponga sus textos fijos en inglés.
 
 Código de salida: 0 coincide, 1 hay diferencias, 2 error.
 """
@@ -28,7 +29,10 @@ def features(text):
         i = next((j for j in range(1, len(lines)) if lines[j].strip() == "---"), 0) + 1
     f = {"títulos": [], "bloques de código": [], "código en línea": Counter(), "imágenes": [],
          "enlaces": Counter(), "tablas": [], "cuadros": [], "ítems de lista": 0, "cifras": Counter()}
-    keys = sorted(ln.split(":", 1)[0].strip() for ln in lines[1:max(i - 1, 0)] if ":" in ln)
+    front = dict((k.strip(), v.strip()) for k, v in
+                 (ln.split(":", 1) for ln in lines[1:max(i - 1, 0)] if ":" in ln))
+    lang = front.pop("idioma", "").lower()                 # cambia a propósito al traducir
+    keys = sorted(front)
     prose = []
     while i < len(lines):
         st = lines[i].strip()
@@ -68,7 +72,7 @@ def features(text):
     f["enlaces"].update(re.findall(r"(?<!!)\[[^\]]+\]\(([^)\s]+)\)", body))
     plain = re.sub(r"`[^`\n]+`|\]\([^)]*\)", " ", body)    # sin código ni rutas
     f["cifras"].update(re.sub(r"[.,]", "", n) for n in re.findall(r"\d+(?:[.,]\d+)*", plain))
-    return f, keys, len(re.sub(r"\s+", " ", plain))
+    return f, keys, len(re.sub(r"\s+", " ", plain)), lang
 
 
 def show(x):
@@ -85,9 +89,13 @@ def main():
         if not p.is_file():
             print(f"No existe el archivo: {p}")
             return 2
-    fa, ka, la = features(a.read_text(encoding="utf-8-sig"))
-    fb, kb, lb = features(b.read_text(encoding="utf-8-sig"))
+    fa, ka, la, _ = features(a.read_text(encoding="utf-8-sig"))
+    fb, kb, lb, lang = features(b.read_text(encoding="utf-8-sig"))
     bad = 0
+    if lang not in ("en", "english", "inglés", "ingles"):
+        bad += 1
+        print("cabecera: la traducción debe declarar `idioma: en`; sin eso el índice, el pie "
+              "y los rótulos de la portada y de los cuadros salen en español")
     if ka != kb:
         bad += 1
         print(f"cabecera: cambian las claves · solo en el original: {sorted(set(ka) - set(kb))} · "

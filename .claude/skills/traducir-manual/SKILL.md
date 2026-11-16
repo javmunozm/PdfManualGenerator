@@ -26,8 +26,10 @@ por partes, en subagentes, y se verifica con un script en vez de releer.
 1. `python tools/costo.py $ARGUMENTS`: mirar el tamaño. Avisar al usuario el costo
    aproximado antes de empezar si pasa de ~40.000 tokens. Si el usuario ya pidió el
    proceso completo, avisar y seguir; si solo pidió extraer o regenerar, preguntar.
-   Antes de partir: `validar.py` sin errores (un NUL impide guardar la parte).
+   Antes de partir: `validar.py` sin errores y el PDF en español verificado contra el
+   original (skill `regenerar-manual`, paso 4).
 2. `python tools/capitulos.py partir documentos/$ARGUMENTS/$ARGUMENTS.md`
+   (los capítulos chicos seguidos van juntos en una parte, hasta llenar la tanda).
 3. Por cada archivo de `documentos/$ARGUMENTS/partes/`, lanzar el subagente `traductor`
    con la ruta de esa parte. Hasta 3 en paralelo, reponiendo una por cada una que
    termina. No leer las partes aquí, con estas dos salvedades:
@@ -49,6 +51,7 @@ por partes, en subagentes, y se verifica con un script en vez de releer.
    - «código en línea: faltan/sobran»: el traductor tradujo marcadores como `<usuario>`.
      Devolverlos al original con un script de reemplazos exactos por línea.
    - Si `fecha` de la cabecera tiene un mes escrito («Octubre 2026»), traducirlo a mano.
+   - «cabecera: la traducción debe declarar `idioma: en`»: agregar esa línea a la cabecera.
 6. `python tools/validar.py documentos/$ARGUMENTS/$ARGUMENTS.md`
 7. Cuando el PDF esté verificado, borrar `documentos/$ARGUMENTS/partes/`.
 

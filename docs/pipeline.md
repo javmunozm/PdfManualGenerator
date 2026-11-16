@@ -26,7 +26,8 @@ output/<n>.pdf      resultado
 terminado           comparar.py con código 0
 ```
 
-Tres casos: **A** documento nuevo (empieza en `documentos/`), **B** regenerar un
+Tres casos: **A** documento nuevo, sin archivo en `sources/` (el contenido se investiga en la
+web y empieza en `documentos/`), **B** regenerar un
 documento existente (todo el flujo), **C** actualizar uno ya generado (editar el `.md`,
 validar, generar, comparar).
 
@@ -36,28 +37,40 @@ validar, generar, comparar).
 
 | # | Etapa | Comando | Entra | Sale | Código de salida |
 |---|---|---|---|---|---|
-| 1 | Extraer | `python tools/extraer.py sources/<archivo>` | PDF, Word, PowerPoint, Excel, JSON, CSV, MD, TXT | `extracted/<n>/` | 0 extraído o sin cambios · 2 se niega (pisaría trabajo manual) o error |
+| 1 | Extraer | `python tools/extraer.py sources/<archivo>` | PDF, Word, PowerPoint, Excel, JSON, CSV, MD, TXT | `extracted/<n>/` | 0 sin pendientes · 1 extraído con pendientes · 2 se niega (pisaría trabajo manual) o error |
 | 2 | Estimar | `python tools/costo.py <n>` | un `.md` | tamaño, pendientes, plan por tandas | 0 |
 | 3 | Resolver pendientes | subagente `describir-figuras` + ediciones | `reporte.md`, `assets/` | `.md` sin `FIGURA: describir` ni `TRANSCRIBIR` | — |
 | 4 | Preparar | `python tools/preparar.py extracted/<n>` | `extracted/<n>/` | `documentos/<n>/` | 0 listo · 1 quedan pendientes · 2 ya existe o error |
 | 5 | Traducir (manuales técnicos) | `python tools/capitulos.py partir\|unir ...` + subagente `traductor` | `.md` en español | `.md` en inglés + `<n>.anterior.md` | 0 · 2 error |
 | 6 | Verificar la traducción | `python tools/comparar_traduccion.py <n>.anterior.md <n>.md` | los dos `.md` | diferencias de estructura | 0 coincide · 1 difiere |
 | 7 | Validar | `python tools/validar.py documentos/<n>/<n>.md` | `.md` | errores y avisos con línea | 0 sin errores · 1 con errores |
-| 8 | Generar | `python manual.py documentos/<n>/<n>.md -o output/<n>.pdf` | `.md` | PDF | 0 · distinto de 0 si falla |
-| 9 | Comparar | `python tools/comparar.py <origen> output/<n>.pdf` | origen (`.md` o PDF) y PDF | resultado | 0 correcto · 1 falla · 2 error |
-| 10 | Revisión visual | comando de `generator.md` (sección 8) + subagente `revisor-visual` | PDF | `output/revision.png` y observaciones | — |
+| 8 | Generar | `python manual.py documentos/<n>/<n>.md -o output/<n>.pdf [--estricto]` | `.md` | PDF | 0 · 1 generado con avisos (solo con `--estricto`) · 2 no se generó |
+| 9 | Comparar | `python tools/comparar.py <origen> output/<n>.pdf` | origen (`.md` o PDF) y PDF | resultado, y su registro en `output/.comparar.json` | 0 correcto · 1 falla · 2 error |
+| 10 | Revisión visual | `python tools/revisar.py output/<n>.pdf` + subagente `revisor-visual` | PDF | `output/revision.png`, `output/revision2.png` y observaciones | 0 · 2 error |
+| — | Estado | `python tools/estado.py` | `extracted/`, `documentos/`, `output/` | una línea por documento con algo pendiente | 0 |
 
-Origen para la etapa 9: `extracted/<n>/<n>.md` si se regeneró sin traducir;
-`documentos/<n>/<n>.md --estricto` si el documento es nuevo, actualizado o traducido.
-Ninguno necesita abrir `sources/`.
+Origen para la etapa 9. El contenido sale de `sources/` (regla 9 de `CLAUDE.md`):
+
+- **Regenerado**: el original, si es un PDF (`sources/<archivo>`: lo lee el script, no
+  entra a la conversación; es el archivo que el usuario autorizó con `/extraer` y el hook
+  pide confirmación). Si el original es de otro formato, `extracted/<n>/<n>.md`.
+- **Traducido**: se compara dos veces. Antes de traducir, el PDF en español contra el
+  original, como regenerado. Al final, el PDF en inglés contra `documentos/<n>/<n>.md
+  --estricto`. Entre ambos, `comparar_traduccion.py` (etapa 6). Así ningún tramo queda
+  sin verificar.
+- **Nuevo o actualizado**: `documentos/<n>/<n>.md --estricto`.
+
+Además de las palabras, `comparar.py` revisa en todo PDF de `manual.py` lo que pone la
+plantilla (capítulo y numeración del pie, índice contra marcadores, idioma de los
+rótulos) y, con un `.md` de origen, los títulos, las figuras y los enlaces.
 
 ---
 
 ## 3. Bibliotecas instaladas
 
 Python 3.14.10 en Windows 11. Versiones instaladas al 12/11/2026, tras reinstalar el
-sistema (`pip install -r requirements.txt` instala las seis primeras; las 58 pruebas
-pasan con estas versiones):
+sistema (`pip install -r requirements.txt` instala las seis primeras; las 99 pruebas
+pasan con estas versiones al 15/11/2026):
 
 | Biblioteca | Instalada | Mínima (`requirements.txt`) | La usa | Para qué |
 |---|---|---|---|---|
@@ -75,6 +88,11 @@ De la biblioteca estándar: `argparse`, `re`, `json`, `hashlib`, `zipfile`,
 `xml.etree.ElementTree` (lectura directa de los paquetes de Office para la cobertura),
 `csv`, `shutil`, `unicodedata`, `collections`, `pathlib`, `tempfile`, `unittest`.
 
+Fuentes: `fonts/DejaVuSans.ttf` y `fonts/DejaVuSansMono.ttf` (DejaVu 2.37, licencia libre
+en `fonts/LICENSE-DejaVu.txt`, 1,1 MB entre las dos). `manual.py` las usa solo para los
+caracteres que Helvetica y Courier no tienen e incrusta en el PDF únicamente los glifos
+usados. Sin esa carpeta el generador funciona, pero esos caracteres salen como ■.
+
 No se usan y conviene saberlo: no hay OCR (Tesseract) ni LibreOffice. Un PDF escaneado se
 transcribe mirando la imagen; un `.doc`, `.ppt` o `.xls` antiguo se convierte antes a mano.
 
@@ -90,7 +108,7 @@ Skills (`.claude/skills/<nombre>/SKILL.md`); se invocan con `/<nombre>`:
 | `/costo <n>` | todos | Usuario o Claude | Etapa 2: tamaño, etapas caras y plan por tandas. |
 | `/regenerar-manual <n>` | B | Usuario o Claude | Etapas 2, 4, 7, 8 y llama a `traducir-manual` y `verificar-pdf`. |
 | `/traducir-manual <n>` | B, A | Usuario o Claude | Etapas 5 y 6. No se usa con `Manual_Curso_IA_Python_v2`. |
-| `/nuevo-manual <n>` | A | Usuario o Claude | Acordar índice, escribir, validar, generar, verificar. |
+| `/nuevo-manual <n>` | A | Usuario o Claude | Acordar lector e índice, investigar en la web, escribir, validar, generar, verificar. |
 | `/actualizar-manual <n> <cambio>` | C | Usuario o Claude | Edición puntual, versión, validar, generar, comparar. |
 | `/verificar-pdf <n>` | todos | Usuario o Claude | Etapas 9 y 10. |
 
@@ -117,7 +135,8 @@ nunca pase por la conversación principal.
 | Describir figuras y transcribir escaneados | Caro por imagen. | Subagente `describir-figuras`: otro modelo, y las imágenes no quedan en la conversación. |
 | Leer el `.md` completo | Su tamaño, en cada turno que siga. | `tools/costo.py` da el mapa; se lee por rangos de líneas (`grep -n "^#"`). |
 | Traducir | El documento entero como salida, que es lo más caro por token. | `capitulos.py` lo parte; cada parte la traduce un `traductor` y se escribe con `Write` (sin repetir el texto viejo); la verificación la hace un script. |
-| Arranque de cada subagente | Unos 7.000 tokens por lanzamiento, tenga la parte 40 tokens o 7.000. En un manual de 87.000 tokens fueron 29 lanzamientos y ~473.000 tokens: cerca del 40% fue arranque. | Partes de menos de ~300 tokens se traducen en la conversación; `--tanda 10000` para la mitad de las partes. |
+| Arranque de cada subagente | Unos 7.000 tokens por lanzamiento, tenga la parte 40 tokens o 7.000. En un manual de 87.000 tokens fueron 29 lanzamientos y ~473.000 tokens: cerca del 40% fue arranque. | `capitulos.py` junta los capítulos chicos seguidos en una parte, hasta llenar la tanda; `--tanda 10000` para la mitad de las partes. |
+| Explorar carpetas al empezar | Varias llamadas para saber en qué está cada documento. | El hook de inicio agrega el resumen de `tools/estado.py`. |
 | Avisos de los subagentes en segundo plano | Cada subagente despierta dos veces a la conversación principal, con todo el historial. | No resumir en cada aviso: solo lanzar la parte siguiente. Modelo intermedio en la conversación principal (auditoría, 12.3). |
 | Reescribir el `.md` para un cambio | Todo el documento como salida. | `Edit` puntual; si el cambio se repite muchas veces, un script en archivo. |
 | Verificar leyendo el PDF | Todo el documento otra vez. | `comparar.py`: unas líneas y un código de salida. |
@@ -143,6 +162,10 @@ Los tokens que muestran las herramientas son aproximados (caracteres / 3,5).
 | Qué | Dónde | Efecto |
 |---|---|---|
 | Hook `guardia.py` (PreToolUse) | `.claude/hooks/`, `.claude/settings.json` | Deniega editar `sources/`; pide confirmación para leerlo o nombrarlo en un comando; deniega leer PDF y Office directamente. También pide confirmación si se llega a `sources/` sin nombrarlo: `Glob` de `**/*`, listado recursivo desde la raíz, comodines, o un encargo a un subagente (H6). |
+| Hook `guardia.py` que falla | `.claude/hooks/guardia.py` | Si no puede leer la llamada o falla por dentro, pide confirmación en vez de dejarla pasar. |
+| Hook `flujo.py` (PostToolUse en Edit y Write) | `.claude/hooks/`, `.claude/settings.json` | Al editar `documentos/<n>/<n>.md` o `extracted/<n>/<n>.md`, ejecuta `validar.py` y devuelve los errores a Claude en el momento. Sin errores no dice nada. |
+| Hook `flujo.py` (Stop) | igual | Si un PDF quedó más viejo que su `.md`, o su última verificación falló, lo dice una vez antes de cerrar el turno. No cuenta un documento sin PDF todavía ni con la traducción en curso. |
+| Hook `flujo.py` (SessionStart) | igual | Agrega al contexto el resumen de `tools/estado.py`: documentos con algo pendiente. |
 | Reglas de permiso | `.claude/settings.json` | `deny` editar `sources/`, `ask` leerlo. |
 | No pisar trabajo manual | `extraer.py`, `preparar.py`, `capitulos.py` | Se niegan si el destino ya existe; con `--forzar` guardan `<n>.anterior.md`. |
 | Pruebas | `tests/` (`python -m unittest discover tests`) | Una por cada error corregido. Crean sus propios archivos. |

@@ -178,6 +178,30 @@ class Comparar(Caso):
         self.assertEqual(rc, 2, out)
         self.assertNotIn("Traceback", out)
 
+    def test_N3_el_pie_y_el_indice_se_revisan_contra_los_marcadores(self):
+        sys.path.insert(0, str(RAIZ / "tools"))
+        import comparar
+        _, pdf = self.generar("tres", "# Uno\n\nA.\n\n# Dos\n\nB.\n\n# Tres\n\nC.\n")
+        with pymupdf.open(pdf) as doc:
+            chrome = comparar.pdf_lines(doc)[3]
+            self.assertEqual(comparar.check_template(doc, chrome, "es"), [])
+            malo = dict(chrome, foot={**chrome["foot"], 4: "Uno Página 4 de 5"})
+            self.assertIn("capítulo equivocado en 1", " ".join(comparar.check_template(doc, malo, "es")))
+            malo = dict(chrome, foot={**chrome["foot"], 4: "Dos Página 3 de 5"})
+            self.assertIn("numeración", " ".join(comparar.check_template(doc, malo, "es")))
+            malo = dict(chrome, index=[x.replace("Dos", "Otro") for x in chrome["index"]])
+            self.assertIn("índice", " ".join(comparar.check_template(doc, malo, "es")))
+
+    def test_C5_titulos_figuras_y_enlaces_del_md_contra_el_pdf(self):
+        cuerpo = "# Uno\n\nVer [la guia](https://ejemplo.org/guia).\n\n## Detalle\n\nTexto.\n"
+        md, pdf = self.generar("base", cuerpo)
+        self.assertEqual(run("tools/comparar.py", md, pdf, "--estricto")[0], 0)
+        otro = self.md("otro", cuerpo.replace("## Detalle", "## Resumen").replace("guia)", "otra)"))
+        rc, out = run("tools/comparar.py", otro, pdf)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("Estructura: títulos", out)
+        self.assertIn("Aviso: enlaces", out)
+
 
 # ---------------------------------------------------------------------------
 class Generador(Caso):
@@ -253,6 +277,164 @@ class Generador(Caso):
         with pymupdf.open(pdf) as doc:
             self.assertEqual(doc.get_toc()[0][1], "Etiqueta <b> y a < b")
 
+    def test_G5_el_pie_muestra_el_capitulo_de_cada_pagina_aunque_el_indice_ocupe_varias(self):
+        cuerpo = "".join(f"# Capitulo {c}\n\n" + "".join(
+            f"## Seccion {c}.{s}\n\nTexto.\n\n" for s in range(1, 9)) for c in range(1, 9))
+        md, pdf = self.generar("largo", cuerpo)
+        with pymupdf.open(pdf) as doc:
+            caps = [(p, t) for nivel, t, p in doc.get_toc() if nivel == 1]
+            self.assertGreater(caps[0][0], 3)                        # índice de 2 páginas o más
+            for page in list(doc)[1:]:
+                n = page.number + 1
+                pie = " ".join(b[4] for b in page.get_text("blocks") if b[1] > page.rect.height * 0.93)
+                real = [t for p, t in caps if p <= n][-1:]
+                if real:
+                    self.assertIn(real[0], pie, f"p.{n}")
+                else:
+                    self.assertNotIn("Capitulo", pie, f"p.{n} (índice)")
+        rc, out = run("tools/comparar.py", md, pdf, "--estricto")
+        self.assertEqual(rc, 0, out)
+
+    def texto(self, pdf, desde=1):
+        with pymupdf.open(pdf) as doc:
+            return "\n".join(p.get_text() for p in list(doc)[desde:])
+
+    def test_G2_cuadro_celda_y_cita_mas_altos_que_una_pagina_se_dividen(self):
+        largo = " ".join(f"palabra{i}" for i in range(1500))
+        relleno = "\n\n".join(["Texto de relleno para bajar en la pagina."] * 21)
+        casos = {"cuadro": f"> [!NOTA]\n> {largo}\n",
+                 "cuadro con titulo": f"{relleno}\n\n> [!NOTA] Titulo\n> Parrafo corto.\n>\n> {largo}\n",
+                 "celda": f"{relleno}\n\n| A | B |\n|---|---|\n| uno | corto |\n| x | {largo} |\n",
+                 "cita": f"> {largo}\n"}
+        for nombre, cuerpo in casos.items():
+            with self.subTest(nombre):
+                md, pdf = self.generar("alto", "# Cap\n\n" + cuerpo)
+                palabras = re.findall(r"palabra\d+", self.texto(pdf))
+                self.assertEqual(palabras, [f"palabra{i}" for i in range(1500)])
+                self.assertEqual(run("tools/comparar.py", md, pdf, "--estricto")[0], 0)
+
+    def test_G4_simbolos_fuera_de_la_fuente_normal_salen_como_texto(self):
+        md, pdf = self.generar("simbolos", "# Agua H₂O y x²\n\nEl ángulo α ≥ β, hecho ✓, "
+                               "**masa Ω₁** y `a → b`.\n\n| S | Uso |\n|---|---|\n| ↔ | ida |\n\n"
+                               "```\nA ──▶ B\n│\n▼\n```\n",
+                               cabecera="---\ntitulo: Química ΔT\nnumerar: no\n---\n\n")
+        texto = self.texto(pdf, 0)
+        for esperado in ("H₂O", "α ≥ β", "✓", "Ω₁", "a → b", "↔",
+                         "A ──▶ B", "▼", "Química ΔT"):
+            self.assertIn(esperado, texto)
+        self.assertNotIn("■", texto)
+        self.assertEqual(run("tools/validar.py", md, "--estricto")[0], 0)
+        self.assertEqual(run("tools/comparar.py", md, pdf, "--estricto")[0], 0)
+
+    def test_G4_un_caracter_que_ninguna_fuente_tiene_se_avisa(self):
+        md = self.md("cjk", "# T\n\nTexto 日本 fin.\n")
+        rc, out = run("manual.py", md, "-o", self.tmp / "cjk.pdf", "--estricto")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("sin glifo", out)
+        self.assertEqual(run("tools/validar.py", md)[0], 1)
+
+    def test_G3_lista_numerada_respeta_su_numero_y_las_lineas_vacias(self):
+        md, pdf = self.generar("listas", "# Cap\n\n5. cinco\n6. seis\n\nTexto.\n\n1. uno\n\n2. dos\n\n"
+                                         "3. tres\n\n```\nx\n```\n\n4. cuatro\n")
+        renglones = [r.strip() for r in self.texto(pdf, 2).splitlines()]
+        for esperado in ("5. cinco", "6. seis", "1. uno", "2. dos", "3. tres", "4. cuatro"):
+            self.assertIn(esperado, renglones)
+        self.assertEqual(run("tools/comparar.py", md, pdf, "--estricto")[0], 0)
+
+    def test_G17_listas_anidadas_conservan_la_jerarquia(self):
+        md, pdf = self.generar("anidada", "# Cap\n\n- fruta\n  - manzana\n  - pera\n- verdura\n\n"
+                                          "1. abrir\n   1. tapa\n   2. sello\n2. cerrar\n")
+        with pymupdf.open(pdf) as doc:
+            x = {w[4]: w[0] for w in doc[2].get_text("words")}
+        self.assertGreater(x["manzana"], x["fruta"] + 8)             # más adentro que su padre
+        self.assertAlmostEqual(x["fruta"], x["verdura"], delta=1)
+        self.assertGreater(x["tapa"], x["abrir"] + 8)
+        renglones = [r.strip() for r in self.texto(pdf, 2).splitlines()]
+        for esperado in ("1. abrir", "1. tapa", "2. sello", "2. cerrar"):
+            self.assertIn(esperado, renglones)
+        self.assertEqual(run("tools/comparar.py", md, pdf, "--estricto")[0], 0)
+
+    def test_G8_lo_que_no_se_pudo_imprimir_se_avisa_y_falla_en_estricto(self):
+        md = self.md("avisos", "# Uno\n\n![pie](no_existe.png)\n\n<!-- nota --> texto perdido\n\n"
+                               "```\nx = 1\n\n# Dos\n")
+        pdf = self.tmp / "avisos.pdf"
+        rc, out = run("manual.py", md, "-o", pdf)
+        self.assertEqual(rc, 0, out)
+        for esperado in ("imagen no encontrada", "después de -->", "sin cerrar"):
+            self.assertIn(esperado, out)
+        self.assertRegex(out, r"Aviso l\.8: imagen")                 # con la línea del .md
+        self.assertEqual(run("manual.py", md, "-o", pdf, "--estricto")[0], 1)
+        self.assertEqual(run("manual.py", RAIZ / "ejemplo.md", "-o", pdf, "--estricto")[0], 0)
+
+    def test_G9_enlace_en_un_titulo_no_queda_crudo_en_el_marcador(self):
+        md, pdf = self.generar("enlace", "# Ver [la guia](https://ejemplo.org) hoy\n\nTexto.\n")
+        with pymupdf.open(pdf) as doc:
+            self.assertEqual(doc.get_toc()[0][1], "Ver la guia hoy")
+            self.assertNotIn("https://", doc[1].get_text())           # el índice
+        self.assertEqual(run("tools/comparar.py", md, pdf, "--estricto")[0], 0)
+
+    def test_G10_crea_la_carpeta_de_salida_y_explica_una_cabecera_invalida(self):
+        md = self.md("ok", "# Uno\n\nTexto.\n")
+        pdf = self.tmp / "no" / "existe" / "ok.pdf"
+        self.assertEqual(run("manual.py", md, "-o", pdf)[0], 0)
+        self.assertTrue(pdf.is_file())
+        for cabecera, esperado in (("color: azul", "color «azul»"), ("dpi_imagenes: alta", "dpi_imagenes")):
+            malo = self.md("malo", "# Uno\n\nTexto.\n", cabecera=f"---\ntitulo: P\n{cabecera}\n---\n\n")
+            rc, out = run("manual.py", malo, "-o", self.tmp / "malo.pdf")
+            self.assertEqual(rc, 2, out)
+            self.assertIn(esperado, out)
+            self.assertNotIn("Traceback", out)
+        rc, out = run("manual.py", self.tmp / "no_hay.md")
+        self.assertEqual(rc, 2, out)
+
+    def test_G11_textos_largos_del_encabezado_y_del_pie_se_recortan(self):
+        cabecera = ("---\ntitulo: " + "Titulo muy largo " * 8 + "\ncurso: " + "Curso largo " * 8
+                    + "\nautor: " + "Nombre Apellido " * 9 + "\nindice: no\nnumerar: no\n---\n\n")
+        md, pdf = self.generar("largo", "# " + "Capitulo largo " * 9 + "\n\nTexto.\n", cabecera=cabecera)
+        with pymupdf.open(pdf) as doc:
+            for page in doc:
+                W = page.rect.width
+                for b in page.get_text("blocks"):
+                    self.assertLess(b[2], W - 60, b[4][:40])           # nada pasa el margen derecho
+            alto = doc[1].rect.height
+            zonas = [sorted((w[0], w[2], w[4]) for w in doc[1].get_text("words") if cond(w))
+                     for cond in (lambda w: w[3] < alto * 0.08, lambda w: w[1] > alto * 0.92)]
+        for palabras in zonas:                                         # encabezado y pie
+            self.assertIn("…", " ".join(p[2] for p in palabras))
+            for a, b in zip(palabras, palabras[1:]):
+                self.assertLessEqual(a[1], b[0] + 0.5, (a, b))         # ningún texto sobre otro
+        rc, out = run("tools/comparar.py", md, pdf)
+        self.assertNotIn("Plantilla", out)                             # el pie recortado se reconoce
+
+    def test_G13_fecha_vacia_usa_la_de_hoy_y_una_seccion_sin_capitulo_no_se_numera(self):
+        _, pdf = self.generar("g13", "## Seccion suelta\n\nTexto.\n\n# Capitulo\n\n## Otra\n\nMas.\n",
+                              cabecera="---\ntitulo: P\nfecha:\n---\n\n")
+        with pymupdf.open(pdf) as doc:
+            self.assertIn("FECHA", doc[0].get_text())
+            self.assertEqual([t for _, t, _ in doc.get_toc()], ["Seccion suelta", "1. Capitulo", "1.1 Otra"])
+
+    EN = "---\ntitulo: Guide\nautor: Ada\nnumerar: no\nidioma: en\n---\n\n"
+
+    def test_N2_un_manual_en_ingles_no_lleva_rotulos_en_espanol(self):
+        md, pdf = self.generar("ingles", "# One\n\n> [!NOTA]\n> Keep it.\n\n> [!CONSEJO]\n> Try it.\n",
+                               cabecera=self.EN)
+        with pymupdf.open(pdf) as doc:
+            texto = "\n".join(p.get_text() for p in doc)
+            self.assertEqual(doc.xref_get_key(doc.pdf_catalog(), "Lang")[1], "en")
+        for esperado in ("Contents", "Page 2 of 3", "AUTHOR", "DATE", "Note", "Tip"):
+            self.assertIn(esperado, texto)
+        for sobra in ("Índice", "Página", "AUTOR", "FECHA", "Nota", "Consejo"):
+            self.assertNotIn(sobra, texto)
+        rc, out = run("tools/comparar.py", md, pdf, "--estricto")
+        self.assertEqual(rc, 0, out)
+
+    def test_N2_comparar_falla_si_el_pdf_tiene_los_rotulos_en_otro_idioma(self):
+        cuerpo = "# One\n\nSome text here.\n"
+        _, pdf = self.generar("es", cuerpo, cabecera=self.EN.replace("idioma: en\n", ""))
+        rc, out = run("tools/comparar.py", self.md("en", cuerpo, cabecera=self.EN), pdf)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("idioma", out)
+
 
 # ---------------------------------------------------------------------------
 class Validar(Caso):
@@ -262,7 +444,7 @@ class Validar(Caso):
         self.assertIn("0 errores, 0 avisos", out)
 
     def test_errores(self):
-        md = self.md("malo", "# Uno\n\nAgua H\u2082O.\n\n![FIGURA: describir](assets/no.png)\n\n"
+        md = self.md("malo", "# Uno\n\nTexto \u65e5\u672c.\n\n![FIGURA: describir](assets/no.png)\n\n"
                              "<!-- nota --> texto perdido\n\n```\nsin cerrar\n",
                      cabecera="---\ntitulo: P\ncolor: azul\n---\n\n")
         rc, out = run("tools/validar.py", md, "--max", "30")
@@ -283,9 +465,10 @@ class Validar(Caso):
                      cabecera="---\ntitulo: P\n---\n\n")
         rc, out = run("tools/validar.py", md, "--max", "30")
         self.assertEqual(rc, 0, out)
-        for esperado in ("0.1", "nivel 4", "guion bajo", "mal cerrada", "empieza en 2",
-                         "lista anidada", "línea horizontal"):
+        for esperado in ("sin número", "nivel 4", "guion bajo", "mal cerrada", "línea horizontal"):
             self.assertIn(esperado, out)
+        for resuelto in ("empieza en", "lista anidada"):            # G3 y G17: ya se admiten
+            self.assertNotIn(resuelto, out)
         self.assertEqual(run("tools/validar.py", md, "--estricto")[0], 1)
 
 
@@ -477,7 +660,7 @@ class Extractor(Caso):
         pdf = self.tmp / "notapie.pdf"
         pdf_con_pie_y_nota(pdf)
         rc, out, carpeta = self.extraer(pdf)
-        self.assertEqual(rc, 0, out)
+        self.assertEqual(rc, 1, out)                                   # extraído, con pendientes
         cuerpo = sin_comentarios(self.leer(carpeta))
         self.assertIn("250 mg cada 8 horas segun la norma 4471", cuerpo)
         self.assertNotIn("Manual de Seguridad", cuerpo)                # el encabezado repetido sí se omite
@@ -518,7 +701,7 @@ class Extractor(Caso):
         origen = self.tmp / "guia.docx"
         d.save(origen)
         rc, out, carpeta = self.extraer(origen)
-        self.assertEqual(rc, 0, out)
+        self.assertEqual(rc, 1, out)                                   # extraído, con pendientes
         reporte = self.leer(carpeta, "reporte.md")
         self.assertRegex(reporte, r"Faltan en pies de página:\*\* .*zeta")
 
@@ -540,7 +723,7 @@ class Extractor(Caso):
         origen = self.tmp / "clase.pptx"
         prs.save(origen)
         rc, out, carpeta = self.extraer(origen)
-        self.assertEqual(rc, 0, out)
+        self.assertEqual(rc, 1, out)                                   # extraído, con pendientes
         reporte = self.leer(carpeta, "reporte.md")
         self.assertIn("Imágenes en el original: 1 | extraídas: 0", reporte)
         self.assertIn("Faltan en las diapositivas", reporte)
@@ -575,7 +758,7 @@ class Extractor(Caso):
         pdf = self.tmp / "manual.pdf"
         pdf_con_codigo_partido(pdf)
         rc, out, carpeta = self.extraer(pdf)
-        self.assertEqual(rc, 0, out)
+        self.assertEqual(rc, 1, out)                                   # extraído, con pendientes
         md = self.leer(carpeta)
         self.assertIn("```\n" + CODIGO + "\n```", md)
         cuerpo = sin_comentarios(md)
@@ -586,7 +769,7 @@ class Extractor(Caso):
         pdf = self.tmp / "manual.pdf"
         pdf_con_codigo_partido(pdf)
         rc, out, carpeta = self.extraer(pdf)
-        self.assertEqual(rc, 0, out)
+        self.assertEqual(rc, 1, out)                                   # extraído, con pendientes
         reporte = self.leer(carpeta, "reporte.md")
         total = int(re.search(r"Renglones de código reunidos \([^)]*\): (\d+)", reporte).group(1))
         lista = reporte.split("## Renglones de código reunidos")[1]
@@ -610,7 +793,7 @@ class Extractor(Caso):
         pdf = self.tmp / "manual.pdf"
         pdf_con_recuadro_de_codigo(pdf, filas)
         rc, out, carpeta = self.extraer(pdf)
-        self.assertEqual(rc, 0, out)
+        self.assertEqual(rc, 1, out)                                   # extraído, con pendientes
         codigo = "\n".join(" " * s + t for s, t in filas)
         self.assertIn("```\n" + codigo + "\n```", self.leer(carpeta))
         reporte = self.leer(carpeta, "reporte.md")
@@ -619,12 +802,226 @@ class Extractor(Caso):
         # los cuatro pares de arriba, más los vecinos que tampoco cabían juntos
         self.assertGreaterEqual(len(re.findall(r"^- p\.2: `…", dudosos, flags=re.M)), 4)
 
+    def test_E4_superindices_y_subindices_no_se_aplanan(self):
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import Paragraph, SimpleDocTemplate
+        pdf = self.tmp / "ciencia.pdf"
+        SimpleDocTemplate(str(pdf)).build([Paragraph(
+            "El volumen es 10<super>3</super> m<super>2</super> de H<sub>2</sub>O segun la "
+            "nota<super>1</super> del texto y la cota x<sub>crit</sub> del equipo.",
+            getSampleStyleSheet()["Normal"])])
+        rc, out, carpeta = self.extraer(pdf)
+        md, reporte = self.leer(carpeta), self.leer(carpeta, "reporte.md")
+        self.assertIn("10³ m² de H₂O segun la nota¹", md)
+        self.assertIn("Cobertura 100%", reporte)                       # 10³ cuenta como 103
+        self.assertIn("sin carácter propio", reporte)                  # «crit» no existe como subíndice
+        self.assertEqual(rc, 1, out)
+
+    def test_E5_word_conserva_enlaces_numeracion_y_celdas_combinadas(self):
+        import docx
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        d = docx.Document()
+        p = d.add_paragraph("Consulta ")
+        rid = d.part.relate_to("https://ejemplo.org/norma", "http://schemas.openxmlformats.org/"
+                               "officeDocument/2006/relationships/hyperlink", is_external=True)
+        h, r, t = OxmlElement("w:hyperlink"), OxmlElement("w:r"), OxmlElement("w:t")
+        h.set(qn("r:id"), rid)
+        t.text = "la norma vigente"
+        r.append(t)
+        h.append(r)
+        p._p.append(h)
+        p.add_run(" antes de empezar.")
+        for paso in ("Abrir", "Medir", "Cerrar"):
+            d.add_paragraph(paso, style="List Number")
+        d.add_paragraph("Suelto", style="List Bullet")
+        tabla = d.add_table(rows=2, cols=3)
+        tabla.cell(0, 0).merge(tabla.cell(0, 2)).text = "Encabezado combinado"
+        for j, v in enumerate(("uno", "dos", "tres")):
+            tabla.cell(1, j).text = v
+        origen = self.tmp / "norma.docx"
+        d.save(origen)
+        rc, out, carpeta = self.extraer(origen)
+        self.assertEqual(rc, 0, out)
+        md = self.leer(carpeta)
+        self.assertIn("Consulta [la norma vigente](https://ejemplo.org/norma) antes de empezar.", md)
+        self.assertIn("1. Abrir\n2. Medir\n3. Cerrar\n- Suelto", md)
+        self.assertEqual(md.count("Encabezado combinado"), 1)
+        self.assertIn("| uno | dos | tres |", md)
+
+    def test_E6_texto_y_csv_guardados_por_windows(self):
+        txt = self.tmp / "nota.txt"
+        txt.write_bytes("Medición de presión: año 2026.\n".encode("cp1252"))
+        rc, out, carpeta = self.extraer(txt)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Medición de presión: año 2026.", self.leer(carpeta))
+        una = self.tmp / "lista.csv"                                   # una sola columna
+        una.write_bytes("Nombre\nAna Muñoz\nLuis\n".encode("cp1252"))
+        rc, out, carpeta = self.extraer(una)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("| Ana Muñoz |", self.leer(carpeta))
+        campo = self.tmp / "campos.csv"                                # salto dentro de un campo
+        campo.write_text('Paso;Detalle\n1;"linea uno\nlinea dos"\n', encoding="utf-8")
+        rc, out, carpeta = self.extraer(campo)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("| 1 | linea uno<br>linea dos |", self.leer(carpeta))
+
+    def test_E8_guion_al_final_del_renglon_corte_o_guion_real(self):
+        pdf = self.tmp / "guiones.pdf"
+        c = canvas.Canvas(str(pdf), pagesize=A4)
+        c.setFont("Helvetica", 11)
+        for i, t in enumerate(["La docu-", "mentacion del equipo es de tipo fisico-",
+                               "quimico y esa documentacion sirve de respaldo."]):
+            c.drawString(70, H - 100 - i * 14, t)
+        c.save()
+        rc, out, carpeta = self.extraer(pdf)
+        md, reporte = self.leer(carpeta), self.leer(carpeta, "reporte.md")
+        self.assertIn("La documentacion del equipo es de tipo fisico-quimico y esa", md)
+        self.assertIn("Guiones conservados al final de un renglón: 1 (fisico-quimico)", reporte)
+        self.assertNotIn("Páginas que requieren revisión", reporte)     # sin faltantes falsos
+        self.assertEqual(rc, 1, out)
+
+    def test_E10_imagenes_transparencia_repeticion_y_jpeg(self):
+        from PIL import Image
+        png, jpg = self.tmp / "logo.png", self.tmp / "foto.jpg"
+        im = Image.new("RGBA", (120, 120), (0, 0, 0, 0))
+        im.paste((200, 30, 30, 255), (30, 30, 90, 90))
+        im.save(png)
+        Image.effect_noise((300, 200), 60).convert("RGB").save(jpg, quality=80)
+        pdf = self.tmp / "imagenes.pdf"
+        c = canvas.Canvas(str(pdf), pagesize=A4)
+        for n in range(1, 5):
+            c.setFont("Helvetica", 11)
+            c.drawString(70, H - 90, f"Texto de la pagina {n} con relleno suficiente para leer.")
+            if n in (1, 2):
+                c.drawImage(str(png), 70, 400, 200, 200, mask="auto")
+            if n == 3:
+                c.drawImage(str(jpg), 70, 400, 300, 200)
+            c.showPage()
+        c.save()
+        rc, out, carpeta = self.extraer(pdf)
+        md = self.leer(carpeta)
+        nombres = re.findall(r"\]\(assets/([^)]+)\)", md)
+        self.assertEqual(len(nombres), 3, md)                           # la repetida se nombra dos veces
+        self.assertEqual(nombres[0], nombres[1])
+        with Image.open(carpeta / "assets" / nombres[0]) as extraida:
+            self.assertEqual(extraida.convert("RGBA").getpixel((0, 0))[3], 0)   # sigue transparente
+        self.assertTrue(nombres[2].endswith(".jpg"))
+        self.assertLess((carpeta / "assets" / nombres[2]).stat().st_size, jpg.stat().st_size * 1.5)
+        self.assertIn("por describir: 2", self.leer(carpeta, "reporte.md"))
+        self.assertEqual(rc, 1, out)
+
+    def test_E11_enlace_en_su_aparicion_y_sin_la_puntuacion(self):
+        pdf = self.tmp / "enlaces.pdf"
+        c = canvas.Canvas(str(pdf), pagesize=A4)
+        c.setFont("Helvetica", 11)
+
+        def linea(y, antes, enlace, despues, url):
+            c.drawString(70, y, antes + enlace + despues)
+            x0 = 70 + c.stringWidth(antes, "Helvetica", 11)
+            c.linkURL(url, (x0, y - 2, x0 + c.stringWidth(enlace, "Helvetica", 11), y + 10))
+        linea(H - 100, "Ver la guia rapida. Despues consulta ", "la guia", " completa del curso.",
+              "https://ejemplo.org/guia")
+        linea(H - 140, "Mas datos del tema estan ", "aqui.", "", "https://ejemplo.org/datos")
+        c.save()
+        rc, out, carpeta = self.extraer(pdf)
+        self.assertEqual(rc, 0, out)
+        md = self.leer(carpeta)
+        self.assertIn("Ver la guia rapida. Despues consulta [la guia](https://ejemplo.org/guia) completa", md)
+        self.assertIn("estan [aqui](https://ejemplo.org/datos).", md)
+        self.assertNotIn("Enlaces:", md)
+
+    def test_E12_excel_y_powerpoint_formato_ocultos_y_limite_de_filas(self):
+        import datetime
+        import openpyxl
+        from pptx import Presentation
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["Obra", "Avance", "Fecha"])
+        ws.append(["Puente", 0.15, datetime.datetime(2026, 11, 10)])
+        ws["B2"].number_format = "0%"
+        ws["C2"].number_format = "dd/mm/yyyy"
+        oculta = wb.create_sheet("Reserva")
+        oculta.append(["Clave", "Valor"])
+        oculta.append(["tope", 7])
+        oculta.sheet_state = "hidden"
+        larga = wb.create_sheet("Larga")
+        larga.append(["N", "Dato"])
+        for i in range(30):
+            larga.append([i, f"dato {i}"])
+        origen = self.tmp / "obra.xlsx"
+        wb.save(origen)
+        rc, out, carpeta = self.extraer(origen, "--filas", "10")
+        md, reporte = self.leer(carpeta), self.leer(carpeta, "reporte.md")
+        self.assertIn("| Puente | 15% | 2026-11-10 |", md)
+        self.assertIn("## Hoja: Reserva (oculta)", md)
+        self.assertIn("| 9 | dato 9 |", md)
+        self.assertNotIn("dato 10 ", md)
+        self.assertIn("Hoja 'Larga': 30 filas; se extrajeron las primeras 10", reporte)
+        self.assertEqual(rc, 1, out)
+        prs = Presentation()
+        for titulo in ("Visible", "Reservada"):
+            prs.slides.add_slide(prs.slide_layouts[5]).shapes.title.text = titulo
+        prs.slides[1]._element.set("show", "0")
+        clase = self.tmp / "clase.pptx"
+        prs.save(clase)
+        rc, out, carpeta = self.extraer(clase)
+        self.assertIn("## Diapositiva 2 (oculta): Reservada", self.leer(carpeta))
+
+    def test_E14_un_titulo_de_metadatos_sin_valor_se_reemplaza_por_el_de_la_portada(self):
+        pdf = self.tmp / "informe.pdf"
+        c = canvas.Canvas(str(pdf), pagesize=A4)
+        c.setTitle("Microsoft Word - informe_final_v3.docx")
+        c.setFont("Helvetica", 11)
+        c.drawString(70, H - 100, "FACULTAD DE INGENIERIA")
+        c.setFont("Helvetica-Bold", 28)
+        c.drawString(70, H - 200, "Manual de Bombas")
+        c.showPage()
+        for n in (2, 3):
+            c.setFont("Helvetica", 11)
+            for i in range(5):
+                c.drawString(70, H - 100 - i * 16, f"Contenido de la pagina {n}, renglon {i} del texto.")
+            c.showPage()
+        c.save()
+        rc, out, carpeta = self.extraer(pdf)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("titulo: Manual de Bombas\n", self.leer(carpeta))
+
+    def test_E15_archivo_protegido_o_danado_da_un_mensaje_y_codigo_2(self):
+        limpio, protegido = self.tmp / "limpio.pdf", self.tmp / "protegido.pdf"
+        c = canvas.Canvas(str(limpio), pagesize=A4)
+        c.drawString(70, H - 100, "Texto.")
+        c.save()
+        with pymupdf.open(limpio) as doc:
+            doc.save(protegido, encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="a", owner_pw="b")
+        roto = self.tmp / "roto.docx"
+        roto.write_bytes(b"esto no es un documento de Word")
+        for archivo, esperado in ((protegido, "contraseña"), (roto, "no se puede abrir")):
+            rc, out, _ = self.extraer(archivo)
+            self.assertEqual(rc, 2, out)
+            self.assertIn(esperado, out)
+            self.assertNotIn("Traceback", out)
+
+    def test_E18_un_simbolo_sin_mapa_queda_como_marca_visible(self):
+        sys.path.insert(0, str(RAIZ / "tools"))
+        import extraer
+        texto, cuantos = extraer.mark_unmapped("<!-- p.3 -->\n\n| Revisar | \x00 |\n\n<!-- p.4 -->\n\nFin �.\n")
+        self.assertEqual(cuantos, {3: 1, 4: 1})
+        self.assertNotIn("\x00", texto)
+        self.assertEqual(texto.count(extraer.MARK), 2)
+        md = self.md("marca", "# T\n\n" + texto)
+        rc, out = run("tools/validar.py", md)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("[SIMBOLO?]", out)
+
     def test_ejemplo_ida_y_vuelta(self):
         pdf = self.tmp / "ejemplo.pdf"
         self.assertEqual(run("manual.py", RAIZ / "ejemplo.md", "-o", pdf)[0], 0)
         rc, out, carpeta = self.extraer(pdf)
         self.assertEqual(rc, 0, out)
+        self.assertIn("Pendientes: ninguno", out)                       # E13: la figura ya tiene pie
         reporte = self.leer(carpeta, "reporte.md")
+        self.assertNotIn("Figuras pendientes de describir", reporte)
         self.assertIn("Títulos detectados: 21 | Marcadores del PDF: 21", reporte)
         md = self.leer(carpeta)
         self.assertIn('    """Calcula el promedio de una lista de notas."""', md)

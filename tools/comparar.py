@@ -12,6 +12,10 @@ Qué comprueba, contando repeticiones y no solo palabras distintas:
     Portada     datos de la cabecera (o de la portada original) ausentes      falla
     Sobrantes   texto del PDF que no está en el origen                        aviso
     Orden       pares de palabras seguidas del origen que no aparecen         aviso
+    Plantilla   en un PDF de manual.py: capítulo del pie, numeración de
+                páginas, índice contra los marcadores e idioma de los rótulos falla
+    Estructura  con un .md de origen: títulos contra marcadores               falla
+                cantidad de figuras y enlaces                                 aviso
 
 Opciones:
     --ignorar "texto"        frase del origen que se reemplazó a propósito (repetible)
@@ -31,7 +35,9 @@ from pathlib import Path
 import pymupdf
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import extraer  # noqa: E402  (mismas reglas de encabezados, pies e índice que el extractor)
+import manual   # noqa: E402  (mismos textos fijos por idioma que el generador)
 
 for _s in (sys.stdout, sys.stderr):   # la consola de Windows (cp1252) no admite todo Unicode
     if hasattr(_s, "reconfigure"):
@@ -40,8 +46,10 @@ for _s in (sys.stdout, sys.stderr):   # la consola de Windows (cp1252) no admite
 TOKEN = re.compile(r"\d+(?:[.,]\d+)*|\w+")      # una cifra con separadores es una unidad
 HEAD_NUM = re.compile(r"^\d+(\.\d+)*\.?\s+")
 LINK = re.compile(r"\[([^\]]+)\]\((?:https?://|mailto:)[^)\s]+\)")
-CALLOUTS = {"NOTA": "Nota", "CONSEJO": "Consejo", "ADVERTENCIA": "Advertencia",
-            "IMPORTANTE": "Importante", "EJERCICIO": "Ejercicio"}
+INDEX_TITLES = {t["indice"] for t in manual.TEXTOS.values()}
+PAGE_LABEL = {k: re.compile(re.escape(t["pagina"]).replace(r"\{page\}", r"(\d+)")
+                            .replace(r"\{total\}", r"(\d+)"))
+              for k, t in manual.TEXTOS.items()}
 COVER_KEYS = ("titulo", "subtitulo", "autor", "curso", "institucion", "version", "fecha")
 
 
@@ -69,7 +77,7 @@ def md_lines(text):
                         cfg[k.strip().lower()] = v.strip().strip('"').strip("'")
                 i = j + 1
                 break
-    out, in_quote = [], False
+    out, in_quote, names = [], False, manual.textos(cfg)
     while i < len(lines):
         st, where = lines[i].strip(), f"l.{i + 1}"
         quote = st.startswith(">")
@@ -97,8 +105,8 @@ def md_lines(text):
         elif quote:
             q = re.sub(r"^\s*>\s?", "", lines[i])
             m = None if in_quote else re.match(r"\[!(\w+)\]\s*(.*)", q.strip())
-            if m and m.group(1).upper() in CALLOUTS:     # el tipo no se imprime si hay título
-                q = m.group(2) or CALLOUTS[m.group(1).upper()]
+            if m and m.group(1).upper() in manual.CALLOUTS:   # el tipo no se imprime si hay título
+                q = m.group(2) or names[m.group(1).upper()]
             out.append((LINK.sub(r"\1", q), where))
         elif st:
             out.append((LINK.sub(r"\1", lines[i]), where))
@@ -107,12 +115,32 @@ def md_lines(text):
     return cfg, out
 
 
+def index_lines(page):
+    """Renglones del índice de una página en orden de lectura: cada título y después el
+    renglón de puntos con su número de página (en el PDF vienen como renglones sueltos)."""
+    H, lines = page.rect.height, []
+    for b in page.get_text("dict")["blocks"]:
+        for ln in b.get("lines", []):
+            text = extraer.norm("".join(s["text"] for s in ln["spans"]))
+            if text and not extraer.zone_of(ln["bbox"][1], ln["bbox"][3], H):
+                lines.append([ln["bbox"][1], bool(extraer.LEADER.search(text)), text])
+    lines.sort()
+    for a, b in zip(lines, lines[1:]):                    # misma altura: un solo renglón
+        if b[0] - a[0] < 3:
+            b[0] = a[0]
+    lines.sort(key=lambda l: (l[0], l[1]))
+    return [l[2] for l in lines]
+
+
 def pdf_lines(doc, skip_pages=()):
-    """Renglones de un PDF separados en cuerpo, portada y auxiliares (índice, pies...)."""
+    """Renglones de un PDF separados en cuerpo, portada y auxiliares (índice, pies...).
+    Lo cuarto que devuelve es lo que pone la plantilla en un PDF de manual.py: los pies
+    de cada página y los renglones del índice, para `check_template`."""
     generated = "manual.py" in ((doc.metadata or {}).get("creator") or "")
     body_size = extraer.body_size(doc)
     bp = extraer.find_boilerplate(doc, body_size, doc.get_toc())
     body, cover, aux = [], [], 0
+    chrome = {"generated": generated, "foot": {}, "index": []}
     for page in doc:
         n, H = page.number + 1, page.rect.height
         rows = []
@@ -134,6 +162,9 @@ def pdf_lines(doc, skip_pages=()):
         if n in skip_pages:
             aux += len(rows)
             continue
+        if generated:
+            chrome["foot"][n] = " ".join(r[0] for r in rows
+                                         if extraer.zone_of(r[1][1], r[1][3], H) == "bot")
         if page.number == 0 and (generated or (
                 doc.page_count > 2 and sum(len(r[0]) for r in rows) < 400
                 and max((r[2] for r in rows), default=0) >= 1.6 * body_size)):
@@ -141,9 +172,11 @@ def pdf_lines(doc, skip_pages=()):
             continue
         leaders = sum(1 for r in rows if extraer.LEADER.search(r[0]))
         inner = [r[0] for r in rows if not extraer.zone_of(r[1][1], r[1][3], H)]
-        own_index = generated and leaders and inner[:1] == ["Índice"]
+        own_index = generated and leaders and inner[:1] and inner[0] in INDEX_TITLES
         if own_index or (leaders >= (1 if generated else 5) and leaders >= 0.4 * len(rows)):
             aux += len(rows)                              # página de índice
+            if generated:
+                chrome["index"] += index_lines(page)
             continue
         for text, bb, _ in rows:
             # En un PDF de manual.py el encabezado y el pie están siempre en la franja;
@@ -153,7 +186,115 @@ def pdf_lines(doc, skip_pages=()):
                 aux += 1
             else:
                 body.append((text, f"p.{n}"))
-    return body, cover, aux
+    return body, cover, aux, chrome
+
+
+def check_template(doc, chrome, lang=None):
+    """Lo que manual.py pone en cada página y el resto de la comparación no mira: el
+    capítulo y la numeración del pie, el índice y el idioma de esos rótulos. `lang` es el
+    idioma que declara el .md (None si el origen es un PDF: solo se revisa la coherencia).
+    Devuelve una lista de problemas, cada uno en una línea."""
+    out, total = [], doc.page_count
+    toc = doc.get_toc()
+    caps = [(p, extraer.norm(t)) for lvl, t, p in toc if lvl == 1]
+    bad_chapter, bad_number, bad_lang = [], [], []
+    for n in range(2, total + 1):
+        foot = chrome["foot"].get(n)
+        if foot is None:                                  # página excluida a propósito
+            continue
+        found = next(((k, m) for k, pat in PAGE_LABEL.items() for m in [pat.search(foot)] if m), None)
+        if not found or (int(found[1].group(1)), int(found[1].group(2))) != (n, total):
+            bad_number.append((n, foot[-30:] or "(vacío)"))
+            continue
+        if lang and found[0] != lang:
+            bad_lang.append((n, found[1].group(0)))
+        shown = extraer.norm(foot.replace(found[1].group(0), " "))
+        real = ""
+        for p, t in caps:
+            if p <= n:
+                real = t
+        cut = shown.endswith("…") and real.startswith(shown[:-1].rstrip())   # recortado
+        if shown != real and not cut:
+            bad_chapter.append((n, shown, real))
+    if bad_chapter:
+        n, shown, real = bad_chapter[0]
+        out.append(f"pie de página: capítulo equivocado en {len(bad_chapter)} páginas; "
+                   f"p.{n} dice «{shown[:40]}» y corresponde «{real[:40]}»")
+    if bad_number:
+        out.append(f"pie de página: numeración ausente o incorrecta en {len(bad_number)} "
+                   f"páginas; p.{bad_number[0][0]} dice «{bad_number[0][1]}»")
+    if bad_lang:
+        out.append(f"idioma: el documento es `idioma: {lang}` y el pie dice "
+                   f"«{bad_lang[0][1]}» ({len(bad_lang)} páginas)")
+    if chrome["index"] and toc:
+        lines = list(chrome["index"])
+        title = lines.pop(0) if lines[0] in INDEX_TITLES else None
+        if lang and title and title != manual.TEXTOS[lang]["indice"]:
+            out.append(f"idioma: el documento es `idioma: {lang}` y el índice se titula «{title}»")
+        got = [t for line in lines for t in tokens(line)]
+        want = [t for _, text, page in toc for t in tokens(text) + [str(page)]]
+        if got != want:
+            k = next((i for i, (a, b) in enumerate(zip(got, want)) if a != b), min(len(got), len(want)))
+            out.append("índice: no coincide con los marcadores (títulos o números de página); "
+                       f"el índice dice {context(got, k)} y los marcadores {context(want, k)}")
+    return out
+
+
+def md_structure(text):
+    """Títulos, imágenes y enlaces de un .md tal como los entiende manual.py."""
+    heads, images, links = [], [], set()
+    lines = text.splitlines()
+    i = 0
+    if lines and lines[0].strip() == "---":
+        i = next((j for j in range(1, len(lines)) if lines[j].strip() == "---"), 0) + 1
+    while i < len(lines):
+        st = lines[i].strip()
+        if st.startswith("```"):
+            i += 1
+            while i < len(lines) and not lines[i].strip().startswith("```"):
+                i += 1
+        elif st.startswith("<!--"):
+            while i < len(lines) and "-->" not in lines[i]:
+                i += 1
+        else:
+            m = re.match(r"(#{1,3})\s+(.*)", st)
+            img = re.fullmatch(r"!\[([^\]]*)\]\(([^)]+)\)", st)
+            if m:
+                heads.append(LINK.sub(r"\1", m.group(2)))
+            if img:
+                images.append(img.group(2).strip())
+            else:
+                plain = re.sub(r"`[^`]+`", " ", st)       # el código en línea es literal
+                links.update(re.findall(r"\[[^\]]+\]\(((?:https?://|mailto:)[^)\s]+)\)", plain))
+        i += 1
+    return heads, images, links
+
+
+def check_structure(md_path, text, cfg, doc):
+    """Estructura del .md contra el PDF generado: (fallas, avisos)."""
+    fails, notes = [], []
+    heads, images, links = md_structure(text)
+    numbered = cfg.get("numerar", "si").lower() in ("si", "sí", "yes", "true", "1")
+    marks = [extraer.norm(t) for _, t, _ in doc.get_toc()]
+    got = [tokens(HEAD_NUM.sub("", t) if numbered else t) for t in marks]
+    want = [tokens(h) for h in heads]
+    if got != want:
+        k = next((i for i, (a, b) in enumerate(zip(got, want)) if a != b), min(len(got), len(want)))
+        a = " ".join(want[k]) if k < len(want) else "(no hay)"
+        b = " ".join(got[k]) if k < len(got) else "(no hay)"
+        fails.append(f"títulos: {len(want)} en el .md y {len(got)} marcadores en el PDF; "
+                     f"primera diferencia en el n.º {k + 1}: «{a[:40]}» / «{b[:40]}»")
+    real = [s for s in images if (md_path.parent / s).is_file()]
+    placed = sum(len(p.get_image_info()) for p in list(doc)[1:])
+    if placed != len(real):
+        notes.append(f"figuras: {len(real)} en el .md y {placed} en el PDF")
+    uris = {ln["uri"] for p in doc for ln in p.get_links() if ln.get("uri")}
+    if uris != links:
+        gone, new = sorted(links - uris), sorted(uris - links)
+        notes.append(f"enlaces: {len(links)} direcciones en el .md y {len(uris)} en el PDF"
+                     + (f"; sin enlace en el PDF: {gone[0][:60]}" if gone else "")
+                     + (f"; solo en el PDF: {new[0][:60]}" if new else ""))
+    return fails, notes
 
 
 def strip_heading_numbers(body, doc):
@@ -325,13 +466,20 @@ def main():
         return 2
 
     out_doc = pymupdf.open(out_path)
-    out_body, out_cover, _ = pdf_lines(out_doc)
+    out_body, out_cover, _, chrome = pdf_lines(out_doc)
     cfg, src_cover, src_doc = {}, [], None
+    template, structure, struct_notes = [], [], []
     if kind == ".pdf":
         src_doc = pymupdf.open(src_path)
-        src_body, src_cover, src_aux = pdf_lines(src_doc, skip)
+        src_body, src_cover, src_aux, _ = pdf_lines(src_doc, skip)
+        if chrome["generated"]:
+            template = check_template(out_doc, chrome)
     else:
-        cfg, src_body = md_lines(src_path.read_text(encoding="utf-8-sig"))
+        src_text = src_path.read_text(encoding="utf-8-sig")
+        cfg, src_body = md_lines(src_text)
+        if chrome["generated"]:
+            template = check_template(out_doc, chrome, manual.idioma(cfg))
+            structure, struct_notes = check_structure(src_path, src_text, cfg, out_doc)
         if cfg.get("numerar", "si").lower() in ("si", "sí", "yes", "true", "1"):
             out_body = strip_heading_numbers(out_body, out_doc)
 
@@ -383,6 +531,12 @@ def main():
             print(f"  {src_t[i]} · {src_l[i]} {context(src_t, i)}")
     if cover_miss:
         print("Portada: faltan " + " ".join(cover_miss[:a.max * 2]))
+    for line in template:
+        print("Plantilla: " + line)
+    for line in structure:
+        print("Estructura: " + line)
+    for line in struct_notes:
+        print("Aviso: " + line)
     n_extra = sum(extra.values())
     if n_extra:
         print(f"Aviso: sobran {n_extra} palabras que no están en el origen: "
@@ -398,12 +552,38 @@ def main():
         fails.append("cifras fuera de lugar")
     if cover_miss:
         fails.append("portada incompleta")
+    if template:
+        fails.append("pie, índice o idioma de la plantilla")
+    if structure:
+        fails.append("títulos distintos")
+    if a.estricto and struct_notes:
+        fails.append("figuras o enlaces distintos")
     if a.estricto and n_extra:
         fails.append("sobra texto")
     if a.estricto and order:
         fails.append("orden distinto")
     print("RESULTADO: " + ("FALLA (" + ", ".join(fails) + ")" if fails else "CORRECTO"))
+    record(out_path, src_path, a.estricto, fails)
     return 1 if fails else 0
+
+
+def record(pdf, origin, strict, fails):
+    """Deja anotado el resultado junto al PDF (.comparar.json) para tools/estado.py: así
+    se sabe después si ese PDF, tal como está, pasó la verificación."""
+    import json
+    from datetime import datetime
+    path = pdf.parent / ".comparar.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except (OSError, ValueError):
+        data = {}
+    data[pdf.name] = {"mtime": pdf.stat().st_mtime, "resultado": "FALLA" if fails else "CORRECTO",
+                      "fallas": fails, "origen": str(origin), "estricto": bool(strict),
+                      "fecha": datetime.now().strftime("%Y-%m-%d %H:%M")}
+    try:
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    except OSError:
+        pass                          # carpeta de solo lectura: la comparación vale igual
 
 
 if __name__ == "__main__":

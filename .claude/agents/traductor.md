@@ -15,7 +15,8 @@ Se traduce:
 - Títulos, párrafos, ítems de lista, celdas de tabla, pies de figura (`![pie](ruta)`),
   títulos de cuadros (`> [!NOTA] título`) y el texto de los cuadros.
 - En la cabecera (entre `---`), solo los valores de `titulo`, `subtitulo`, `curso`,
-  `institucion` y `palabras_clave`.
+  `institucion` y `palabras_clave`. Además, deja `idioma: en` (agrega la línea si no
+  está): con eso el índice, el pie y los rótulos de la plantilla salen en inglés.
 
 No se toca, ni un carácter:
 

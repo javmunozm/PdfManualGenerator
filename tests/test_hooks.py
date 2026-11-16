@@ -104,6 +104,75 @@ class SinNombrarlo(unittest.TestCase):
         self.assertIn("sources/", [ln.strip() for ln in ignorados])
 
 
+class SiElGuardiaFalla(unittest.TestCase):
+    def test_N7_una_llamada_ilegible_pide_confirmacion(self):
+        r = subprocess.run([sys.executable, "-B", str(HOOK)], input="esto no es JSON",
+                           capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"], "ask")
+
+
+class Flujo(unittest.TestCase):
+    """H3, H4 y H5 (.claude/hooks/flujo.py), con documentos creados en una carpeta temporal."""
+
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.raiz = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def hook(self, evento, **datos):
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=str(self.raiz))
+        r = subprocess.run([sys.executable, "-B", str(RAIZ / ".claude" / "hooks" / "flujo.py")],
+                           input=json.dumps({"hook_event_name": evento, **datos}),
+                           capture_output=True, text=True, encoding="utf-8", env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout) if r.stdout.strip() else None
+
+    def md(self, carpeta, nombre, texto):
+        ruta = self.raiz / carpeta / nombre / f"{nombre}.md"
+        ruta.parent.mkdir(parents=True, exist_ok=True)
+        ruta.write_text(texto, encoding="utf-8")
+        return ruta
+
+    def editar(self, ruta):
+        return self.hook("PostToolUse", tool_name="Edit", tool_input={"file_path": str(ruta)})
+
+    def test_H3_al_editar_un_documento_devuelve_los_errores(self):
+        malo = self.md("documentos", "a", "---\ntitulo: A\n---\n\n# Uno\n\n```\nsin cerrar\n")
+        salida = self.editar(malo)
+        self.assertEqual(salida["hookSpecificOutput"]["hookEventName"], "PostToolUse")
+        self.assertIn("sin cerrar", salida["hookSpecificOutput"]["additionalContext"])
+        self.assertIsNone(self.editar(self.md("documentos", "b", "---\ntitulo: B\n---\n\n# Uno\n\nTexto.\n")))
+        self.assertIsNone(self.editar(self.raiz / "README.md"))            # fuera del flujo
+
+    def test_H3_en_extracted_no_repite_lo_que_ya_lleva_el_reporte(self):
+        figura = "# T\n\n![FIGURA: describir](assets/a.png)\n"
+        self.assertIsNone(self.editar(self.md("extracted", "c", figura)))
+        salida = self.editar(self.md("extracted", "d", figura + "\nCasilla [SIMBOLO?] pendiente.\n"))
+        self.assertIn("[SIMBOLO?]", salida["hookSpecificOutput"]["additionalContext"])
+
+    def test_H4_no_deja_cerrar_con_un_pdf_mas_viejo_que_su_md_y_no_insiste(self):
+        md = self.md("documentos", "e", "---\ntitulo: E\n---\n\n# Uno\n\nTexto.\n")
+        self.assertIsNone(self.hook("Stop"))                              # sin PDF: en trabajo
+        pdf = self.raiz / "output" / "e.pdf"
+        pdf.parent.mkdir()
+        pdf.write_bytes(b"%PDF-1.4")
+        os.utime(md, (pdf.stat().st_mtime + 60, pdf.stat().st_mtime + 60))
+        salida = self.hook("Stop")
+        self.assertEqual(salida["decision"], "block")
+        self.assertIn("PDF desactualizado", salida["reason"])
+        self.assertIsNone(self.hook("Stop", stop_hook_active=True))
+
+    def test_H5_al_empezar_resume_lo_pendiente(self):
+        self.assertIsNone(self.hook("SessionStart"))                      # nada que decir
+        self.md("documentos", "f", "---\ntitulo: F\n---\n\n# Uno\n\nTexto.\n")
+        salida = self.hook("SessionStart")
+        self.assertIn("f: sin PDF", salida["hookSpecificOutput"]["additionalContext"])
+
+
 class Originales(unittest.TestCase):
     def test_no_se_leen_binarios_del_proyecto(self):
         self.assertEqual(decision("Read", {"file_path": str(RAIZ / "ejemplo.pdf")}), "deny")

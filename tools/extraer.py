@@ -15,11 +15,14 @@ Genera, en extracted/<nombre>/:
 Método y reglas: docs/extractor.md
 """
 import argparse
+import csv
+import datetime as dt
 import hashlib
 import io
 import json
 import re
 import sys
+import unicodedata
 import zipfile
 from collections import Counter
 from datetime import datetime
@@ -41,6 +44,18 @@ WORD = re.compile(r"[\wáéíóúüñ]+", re.I)
 MARGIN = 0.065  # franja superior/inferior donde viven encabezados y pies
 BAND = 0.15     # franja donde se busca texto repetido en la misma posición
 COL_GAP = 9     # hueco mínimo (pt) entre columnas; un espacio normal mide menos
+MARK = "[SIMBOLO?]"   # símbolo sin mapa de caracteres en el original (era NUL en el texto)
+MAX_ROWS = 2000       # filas por hoja o CSV; 0 = todas (opción --filas)
+JUNK_TITLE = re.compile(r"^(\(?anonymous\)?|untitled|unspecified|sin t[ií]tulo|microsoft word - .*|"
+                        r"document\d*|documento\d*|presentaci[oó]n\d*|presentation\d*|"
+                        r".*\.(docx?|pptx?|xlsx?|pdf|indd|tex|dvi|odt))$", re.I)
+# Superíndices y subíndices que existen como caracteres propios
+SUP = str.maketrans("0123456789+-=()ni", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿⁱ")
+SUB = str.maketrans("0123456789+-=()aeoxhklmnpst", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜ")
+
+
+class ExtractError(Exception):
+    """El archivo no se puede extraer; el mensaje dice por qué."""
 
 
 def norm(s):
@@ -52,7 +67,36 @@ def key(s):
 
 
 def words(s):
-    return Counter(w.lower() for w in WORD.findall(s))
+    """Palabras con repetición. NFKC: «10³» y «103» cuentan como la misma palabra, porque
+    el texto plano del PDF trae el superíndice aplanado y el Markdown no."""
+    return Counter(w.lower() for w in WORD.findall(unicodedata.normalize("NFKC", s)))
+
+
+def fix_scripts(spans, lost=None):
+    """Superíndices y subíndices como caracteres propios (10³, H₂O): el texto plano los
+    aplana y cambia el significado (E4). Un tramo es superíndice o subíndice si es corto,
+    de letra más chica que el resto del renglón y está más arriba o más abajo. Si alguno
+    de sus caracteres no existe como superíndice, queda igual y se anota en `lost`."""
+    real = [s for s in spans if s["text"].strip()]
+    if len(real) < 2:
+        return spans
+    main = max(real, key=lambda s: s["size"] * len(s["text"].strip()))
+    out = []
+    for s in spans:
+        t, table = s["text"].strip(), None
+        if t and s is not main and len(t) <= 6 and s["size"] <= 0.85 * main["size"]:
+            dy = s.get("origin", (0, 0))[1] - main.get("origin", (0, 0))[1]
+            if s["flags"] & 1 or dy < -0.15 * main["size"]:
+                table = SUP
+            elif dy > 0.08 * main["size"]:
+                table = SUB
+        if table:
+            if all(ord(c) in table for c in t):
+                s = dict(s, text=s["text"].translate(table))
+            elif lost is not None:
+                lost.append(t)
+        out.append(s)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -83,14 +127,15 @@ def span_md(spans):
     return s
 
 
-def block_lines(b):
+def block_lines(b, lost=None):
     """Devuelve líneas (texto plano, texto md, bbox) y rasgos del bloque."""
     lines, sizes, mono, bold = [], [], True, True
     for ln in b["lines"]:
-        plain = "".join(s["text"] for s in ln["spans"])
+        spans = fix_scripts(ln["spans"], lost)
+        plain = "".join(s["text"] for s in spans)
         if not plain.strip():
             continue
-        lines.append((plain, span_md(ln["spans"]), ln["bbox"]))
+        lines.append((plain, span_md(spans), ln["bbox"]))
         for s in ln["spans"]:
             if s["text"].strip():
                 sizes.append(s["size"])
@@ -202,22 +247,52 @@ def heading_level(text, size, bold, nlines, body, toc_levels):
     return 0
 
 
-def join_lines(md_lines):
+def glue(out, ln, vocab=None, kept=None):
+    """Agrega un renglón al texto anterior. Si el anterior termina en guion y este sigue
+    en minúscula, puede ser un corte de renglón (docu-/mentación) o un guion de verdad
+    (físico-/químico). Se une sin guion solo si la palabra unida existe en otra parte del
+    documento (`vocab`); si no, el guion se conserva y la palabra se anota en `kept` (E8).
+    Sin `vocab` se une siempre."""
+    if out.endswith("-") and ln[:1].islower():
+        a, b = re.search(r"[^\W\d_]+(?=-$)", out), re.match(r"[^\W\d_]+", ln)
+        whole = (a.group(0) + b.group(0)).lower() if a and b else ""
+        if vocab is None or not whole or whole in vocab:
+            return out[:-1] + ln
+        if kept is not None:
+            kept.append(f"{a.group(0)}-{b.group(0)}")
+        return out + ln
+    return f"{out} {ln}" if out else ln
+
+
+def join_lines(md_lines, vocab=None, kept=None):
     """Une las líneas de un párrafo y corrige guiones de corte."""
     out = ""
     for ln in md_lines:
-        ln = ln.strip()
-        if out.endswith("-") and ln[:1].islower():
-            out = out[:-1] + ln
-        else:
-            out = f"{out} {ln}" if out else ln
+        out = glue(out, ln.strip(), vocab, kept)
     return norm(out)
 
 
-def save_pixmap(pix, path):
-    if pix.colorspace and pix.colorspace.n > 3:
-        pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
-    pix.save(str(path))
+def save_image(doc, xref, assets, stem, page, bb):
+    """Guarda una imagen del PDF y devuelve el nombre del archivo (E10). Un JPEG se guarda
+    tal cual (pesa menos que su PNG); una imagen con transparencia conserva su canal alfa
+    en vez de quedar con fondo negro."""
+    try:
+        info = doc.extract_image(xref) if xref else None
+        if info and not info.get("smask") and info.get("ext") in ("jpeg", "jpg") \
+                and info.get("colorspace") in (1, 3):
+            (assets / f"{stem}.jpg").write_bytes(info["image"])
+            return f"{stem}.jpg"
+        pix = pymupdf.Pixmap(doc, xref)
+        if pix.colorspace and pix.colorspace.n > 3:
+            pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+        if info and info.get("smask"):
+            if pix.alpha:
+                pix = pymupdf.Pixmap(pix, 0)
+            pix = pymupdf.Pixmap(pix, pymupdf.Pixmap(doc, info["smask"]))
+        pix.save(str(assets / f"{stem}.png"))
+    except Exception:
+        page.get_pixmap(clip=bb, dpi=150).save(str(assets / f"{stem}.png"))
+    return f"{stem}.png"
 
 
 # ---------------------------------------------------------------------------
@@ -437,7 +512,7 @@ def cell_md(page, rect):
             spans = [s for s in ln["spans"] if rect.contains(pymupdf.Point(
                 (s["bbox"][0] + s["bbox"][2]) / 2, (s["bbox"][1] + s["bbox"][3]) / 2))]
             if spans:
-                parts.append(span_md(spans).strip())
+                parts.append(span_md(fix_scripts(spans)).strip())
     return norm(" ".join(parts))
 
 
@@ -538,16 +613,16 @@ def page_to_md(doc, page, ctx):
         if info["width"] < 48 or info["height"] < 48 or bb.get_area() < 0.01 * W * H:
             continue
         img_rects.append(bb)
-        if xref in ctx["seen_imgs"]:
-            continue
-        ctx["seen_imgs"].add(xref)
-        name = f"p{n}-img{xref}.png"
-        try:
-            save_pixmap(pymupdf.Pixmap(doc, xref), assets / name)
-        except Exception:
-            page.get_pixmap(clip=bb, dpi=150).save(str(assets / name))
-        items.append((bb.y0, bb.x0, ("IMG", name, bb)))
-        ctx["figures"].append(f"assets/{name}")
+        name = ctx["img_names"].get(xref) if xref else None
+        if name and ctx["img_pages"][xref] >= ctx["img_repeat"]:
+            continue                  # la misma imagen en muchas páginas (un logo): una vez
+        if not name:
+            stem = f"p{n}-img{xref}" if xref else f"p{n}-img0-{len(ctx['figures']) + 1}"
+            name = save_image(doc, xref, assets, stem, page, bb)
+            ctx["figures"].append(f"assets/{name}")
+            if xref:
+                ctx["img_names"][xref] = name
+        items.append((bb.y0, bb.x0, ("IMG", name, bb)))   # si se repite, se vuelve a nombrar
 
     # Gráficos vectoriales grandes con poco texto (diagramas, gráficos)
     for i, r in enumerate(clusters):
@@ -584,7 +659,7 @@ def page_to_md(doc, page, ctx):
     for b in blocks:
         if in_table(b["bbox"]):
             continue
-        lines, size, mono, bold = block_lines(b)
+        lines, size, mono, bold = block_lines(b, ctx["scripts_lost"])
         kept = []
         for plain, md, bb in lines:
             if is_boiler(plain, bb, H, ctx["bp"]):
@@ -617,8 +692,9 @@ def page_to_md(doc, page, ctx):
                 cur.append(md)
         if cur:
             paras.append(cur)
-        text = "\n".join(join_lines(p) if not p[0].startswith("- ")
-                         else "- " + join_lines([p[0][2:]] + p[1:]) for p in paras)
+        vocab, hyph = ctx["vocab"], ctx["hyphens"]
+        text = "\n".join(join_lines(p, vocab, hyph) if not p[0].startswith("- ")
+                         else "- " + join_lines([p[0][2:]] + p[1:], vocab, hyph) for p in paras)
         if ctx["pending_bullet"] and len(kept) and not text.startswith("- "):
             text = "- " + text
         ctx["pending_bullet"] = norm(plain_all) in ("•", "●", "▪", "-")
@@ -726,60 +802,117 @@ def clean_table(page, t):
 
 
 def add_links(page, md):
-    """Recupera las URL de los enlaces (el texto extraído no las trae)."""
-    by_uri, page_words = {}, page.get_text("words")
+    """Recupera las URL de los enlaces (el texto extraído no las trae) (E11).
+
+    - La puntuación final queda fuera del enlace.
+    - El texto se busca aunque en el Markdown tenga marcas de formato entre palabras.
+    - Si el texto aparece varias veces en la página, se elige la aparición que corresponde
+      a la posición del enlace, no la primera.
+    - Dos enlaces a la misma dirección son dos enlaces; un enlace que sigue en el renglón
+      siguiente es uno solo.
+    """
+    page_words = page.get_text("words")
+    centers = [pymupdf.Point((w[0] + w[2]) / 2, (w[1] + w[3]) / 2) for w in page_words]
+    found = []
     for ln in page.get_links():
         if ln.get("uri"):
-            r = ln["from"]
-            txt = " ".join(w[4] for w in page_words
-                           if r.contains(pymupdf.Point((w[0] + w[2]) / 2, (w[1] + w[3]) / 2)))
-            by_uri.setdefault(ln["uri"], []).append(txt)
-    missing = []
-    for uri, parts in by_uri.items():
-        text = norm(" ".join(parts))
-        if text and text in md:
-            md = md.replace(text, f"[{text}]({uri})", 1)
+            idx = [i for i, c in enumerate(centers) if ln["from"].contains(c)]
+            found.append((idx[0] if idx else len(centers), ln["uri"], idx))
+    links = []
+    for _, uri, idx in sorted(found, key=lambda f: f[0]):
+        if links and links[-1][0] == uri and idx and links[-1][1] and idx[0] == links[-1][1][-1] + 1:
+            links[-1][1].extend(idx)
         else:
-            missing.append(f"[{text or uri}]({uri})")
+            links.append([uri, list(idx)])
+    missing = []
+    for uri, idx in links:
+        safe = uri.replace("(", "%28").replace(")", "%29").replace(" ", "%20")
+        core = norm(" ".join(page_words[i][4] for i in idx)).rstrip(".,;:")
+        placed = False
+        if core:
+            nth = " ".join(w[4] for w in page_words[:idx[0]]).count(core)
+            pat = re.compile(r"(?<![\w\[])" + r"[*]*\s+[*]*".join(re.escape(w) for w in core.split())
+                             + r"(?!\w)(?!\]\()")
+            taken = [m.span() for m in re.finditer(r"\[[^\]\n]*\]\([^)\n]*\)|```.*?```|`[^`\n]*`", md, re.S)]
+            hits = [m for m in pat.finditer(md)
+                    if not any(a <= m.start() < b for a, b in taken)]   # ni en otro enlace ni en código
+            if hits:
+                m = hits[min(nth, len(hits) - 1)]
+                md = md[:m.start()] + f"[{m.group(0)}]({safe})" + md[m.end():]
+                placed = True
+        if not placed:
+            missing.append(f"[{core or uri}]({safe})")
     if missing:
         md += "\n\nEnlaces: " + ", ".join(missing)
     return md
 
 
 # ---------------------------------------------------------------------------
-def coverage(raw_lines, md, removed):
-    """Palabras del original que no aparecen en el Markdown de esa página."""
-    src = words("\n".join(raw_lines)) - words("\n".join(removed))
+def coverage(raw_lines, md, removed, vocab=None):
+    """Palabras del original que no aparecen en el Markdown de esa página. Los renglones
+    del original se unen con la misma regla de guiones que el Markdown (E8): una palabra
+    cortada al final del renglón no cuenta como faltante."""
+    text = ""
+    for line in raw_lines:
+        text = glue(text, line, vocab)
+    src = words(text) - words("\n".join(removed))
     miss = src - words(md)
     total = sum(src.values()) or 1
     return 1 - sum(miss.values()) / total, list(miss)[:10]
 
 
+def mark_unmapped(md_text):
+    """Reemplaza por una marca visible y buscable los símbolos cuya fuente no dice qué
+    carácter son (llegan como NUL o U+FFFD) (E18). Devuelve (texto, {página: cuántos})."""
+    unmapped, page_now = {}, 0
+    for ln in md_text.split("\n"):
+        m = re.match(r"<!-- p\.(\d+)", ln)
+        page_now = int(m.group(1)) if m else page_now
+        n_bad = ln.count("\x00") + ln.count("�")
+        if n_bad:
+            unmapped[page_now] = unmapped.get(page_now, 0) + n_bad
+    return md_text.replace("\x00", MARK).replace("�", MARK), unmapped
+
+
 def extract(pdf_path, out_dir):
     pdf_path, out_dir = Path(pdf_path), Path(out_dir)
-    doc = pymupdf.open(pdf_path)
+    try:
+        doc = pymupdf.open(pdf_path)
+    except Exception as e:
+        raise ExtractError(f"el PDF no se puede abrir ({type(e).__name__}): está dañado o no es un PDF")
+    if doc.needs_pass:
+        raise ExtractError("el PDF está protegido con contraseña: guardar una copia sin protección")
     name = out_dir.name
     assets = out_dir / "assets"
     assets.mkdir(parents=True, exist_ok=True)
 
     toc = doc.get_toc()
     body = body_size(doc)
+    vocab, img_pages = set(), Counter()         # palabras del documento; páginas de cada imagen
+    for page in doc:
+        vocab.update(re.findall(r"[^\W\d_]+", page.get_text().lower()))
+        img_pages.update({info["xref"] for info in page.get_image_info(xrefs=True) if info["xref"]})
     ctx = dict(body=body, assets=assets, bp=find_boilerplate(doc, body, toc), code_joined=0,
                toc_levels={key(t): lvl - min(x[0] for x in toc) + 1 for lvl, t, _ in toc},
-               seen_imgs=set(),
+               img_names={}, img_pages=img_pages, img_repeat=max(3, 0.3 * doc.page_count),
+               vocab=vocab, hyphens=[], scripts_lost=[],
                figures=[], scanned=[], headings=[], pending_bullet=False)
 
-    pages_md, report_rows, all_removed, cover_lines = [], [], set(), []
+    pages_md, report_rows, info_rows, all_removed, cover_lines = [], [], [], set(), []
+    cover_title = ""
     for page in doc:
         md, notes, removed, raw = page_to_md(doc, page, ctx)
         all_removed.update(removed)
-        cov, miss = coverage(raw, md, removed)
+        cov, miss = coverage(raw, md, removed, vocab)
         # Portada: poco texto y con letra grande -> comentario
         biggest = max((s["size"] for b in page.get_text("dict")["blocks"]
                        for ln in b.get("lines", []) for s in ln["spans"]), default=0)
         if page.number == 0 and doc.page_count > 2 and sum(len(l) for l in raw) < 400 \
                 and biggest >= 1.6 * ctx["body"]:
             cover_lines = raw
+            spans = [s for b in page.get_text("dict")["blocks"] for ln in b.get("lines", [])
+                     for s in ln["spans"] if s["text"].strip()]
+            cover_title = norm(" ".join(s["text"] for s in spans if s["size"] >= biggest - 0.5))
             labels = {"curso": "curso", "autor": "autor", "autora": "autor",
                       "versión": "version", "version": "version", "fecha": "fecha",
                       "institución": "institucion", "institucion": "institucion"}
@@ -791,12 +924,18 @@ def extract(pdf_path, out_dir):
             ctx["headings"] = [h for h in ctx["headings"] if h not in raw]
             notes.append("portada: datos en la cabecera")
         pages_md.append(md)
-        if cov < 0.98 or notes:
-            report_rows.append(f"| {page.number + 1} | {cov:.0%} | {'; '.join(notes)} "
+        # Solo va a "requieren revisión" lo que pide hacer algo (E13); lo demás es informativo
+        todo = [x for x in notes if not x.startswith(("índice original", "portada:"))]
+        if cov < 0.98 or todo:
+            report_rows.append(f"| {page.number + 1} | {cov:.0%} | {'; '.join(todo)} "
                                f"| {' '.join(miss)} |")
+        if len(todo) < len(notes):
+            info_rows.append(f"p.{page.number + 1}: " + "; ".join(x for x in notes if x not in todo))
 
     meta = doc.metadata or {}
-    titulo = meta.get("title") or (cover_lines[0] if cover_lines else name)
+    titulo = (meta.get("title") or "").strip()
+    if not titulo or JUNK_TITLE.match(titulo):      # título de metadatos sin valor (E14)
+        titulo = cover_title or (cover_lines[0] if cover_lines else name)
     numbered = sum(bool(NUM_HEAD.match(h)) for h in ctx["headings"])
     front = {
         "titulo": titulo,
@@ -813,33 +952,35 @@ def extract(pdf_path, out_dir):
         uniq = sorted({re.sub(r"\d+", "#", r) for r in all_removed})
         head += "\n<!-- ENCABEZADOS/PIES REPETIDOS (omitidos): " + " | ".join(uniq) + " -->\n"
     md_text = head + "\n" + "\n\n".join(pages_md) + "\n"
+    md_text, unmapped = mark_unmapped(md_text)
     md_file = out_dir / f"{name}.md"
     md_file.write_text(md_text, encoding="utf-8")
+    pending_figs = re.findall(r"!\[FIGURA: describir\]\(([^)]+)\)", md_text)
 
     rep = [
         f"# Reporte de extracción: {pdf_path.name}",
         "",
         f"- Páginas: {doc.page_count} | Títulos detectados: {len(ctx['headings'])} "
         f"| Marcadores del PDF: {len(toc)}",
-        f"- Markdown: `{md_file.name}` ({len(md_text):,} caracteres, ~{len(md_text) // 4:,} tokens)",
-        f"- Figuras guardadas (describir): {len(ctx['figures'])}",
+        f"- Markdown: `{md_file.name}` ({len(md_text):,} caracteres, ~{round(len(md_text) / 3.5):,} tokens)",
+        f"- Figuras guardadas: {len(ctx['figures'])} | por describir: {len(set(pending_figs))}",
         f"- Páginas escaneadas (transcribir): {ctx['scanned'] or 'ninguna'}",
     ]
+    if ctx["hyphens"]:
+        rep.append(f"- Guiones conservados al final de un renglón: {len(ctx['hyphens'])} "
+                   f"({', '.join(dict.fromkeys(ctx['hyphens']))[:300]}). La palabra unida no aparece "
+                   "en otra parte del documento: si era un corte de renglón, quitar el guion.")
+    if ctx["scripts_lost"]:
+        rep.append(f"- Superíndices o subíndices sin carácter propio (quedaron en línea): "
+                   f"{', '.join(dict.fromkeys(ctx['scripts_lost']))[:200]}. Revisar el sentido.")
     if ctx["code_joined"]:
         rep.append(f"- Renglones de código reunidos (el original los partió por ancho): "
                    f"{ctx['code_joined']}. Revisar todos: lista al final.")
     if ctx.get("code_doubts"):
         rep.append(f"- Renglones de código que podrían estar partidos y no se unieron: "
                    f"{len(ctx['code_doubts'])}. Lista al final.")
-    unmapped, page_now = {}, 0                    # símbolos sin mapa de caracteres, por página
-    for ln in md_text.split("\n"):
-        m = re.match(r"<!-- p\.(\d+)", ln)
-        page_now = int(m.group(1)) if m else page_now
-        n_bad = ln.count("\x00") + ln.count("�")
-        if n_bad:
-            unmapped[page_now] = unmapped.get(page_now, 0) + n_bad
     if unmapped:
-        rep.append(f"- Símbolos sin mapa de caracteres (quedaron como NUL en el .md): "
+        rep.append(f"- Símbolos sin mapa de caracteres (quedaron como `{MARK}` en el .md): "
                    f"{sum(unmapped.values())}, en p. "
                    + ", ".join(f"{p} ({n})" for p, n in sorted(unmapped.items()))
                    + ". Reemplazar cada uno por el símbolo que se ve en el original.")
@@ -850,9 +991,11 @@ def extract(pdf_path, out_dir):
                 *report_rows]
     else:
         rep.append("Cobertura 100% en todas las páginas; sin observaciones.")
-    if ctx["figures"]:
+    if info_rows:
+        rep += ["", "## Notas (no requieren acción)", "", *[f"- {r}" for r in info_rows]]
+    if pending_figs:
         rep += ["", "## Figuras pendientes de describir", "",
-                *[f"- `{f}`" for f in ctx["figures"]]]
+                *[f"- `{f}`" for f in dict.fromkeys(pending_figs)]]
     if ctx.get("code_joins"):
         rep += ["", "## Renglones de código reunidos", "",
                 "Cada línea: página, final del renglón y lo que se le unió. Es correcto solo si "
@@ -903,8 +1046,9 @@ def finish(src, out_dir, front, body, figures=(), notes=(), src_words=None, ref=
     md_file.write_text(md_text, encoding="utf-8")
     rep = [f"# Reporte de extracción: {src.name}", "",
            f"- Markdown: `{md_file.name}` ({len(md_text):,} caracteres, "
-           f"~{len(md_text) // 4:,} tokens)",
-           f"- Figuras guardadas (describir): {len(figures)}"]
+           f"~{round(len(md_text) / 3.5):,} tokens)",
+           f"- Figuras guardadas: {len(figures)} | por describir: "
+           f"{md_text.count('![FIGURA: describir]')}"]
     parts = ref if ref is not None else ({"": src_words} if src_words is not None else {})
     if parts:
         total = Counter()
@@ -1077,9 +1221,25 @@ def json_words(data):
     return values
 
 
+def read_text(src):
+    """Texto de un archivo en UTF-8 (con o sin BOM), UTF-16 o, si no, cp1252: lo que
+    exportan Excel y el Bloc de notas de Windows en español (E6)."""
+    data = Path(src).read_bytes()
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return data.decode("utf-16")
+    for enc in ("utf-8-sig", "cp1252"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            pass
+    return data.decode("latin-1")
+
+
 def extract_json(src, out_dir):
-    import json
-    data = json.loads(Path(src).read_text(encoding="utf-8-sig"))
+    try:
+        data = json.loads(read_text(src))
+    except ValueError as e:
+        raise ExtractError(f"el JSON no es válido: {e}")
     body = json_to_md(data)
     notes = ["JSON convertido: listas de objetos -> tablas; objetos -> listas `clave: valor`.",
              "Los tipos (número/texto) no se distinguen en el Markdown; el original sigue en sources/."]
@@ -1088,7 +1248,7 @@ def extract_json(src, out_dir):
 
 
 def extract_text(src, out_dir):
-    text = Path(src).read_text(encoding="utf-8-sig")
+    text = read_text(src).replace("\r\n", "\n").replace("\r", "\n")
     front = {"titulo": Path(src).stem}
     m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
     if m:  # conserva la cabecera existente
@@ -1103,44 +1263,113 @@ def extract_text(src, out_dir):
                   notes=["Texto ya optimizado: solo se limpiaron espacios y líneas vacías."])
 
 
+def limit_rows(rows, label, notes):
+    """Recorta una tabla enorme a MAX_ROWS filas y lo deja escrito en el reporte (E12)."""
+    if MAX_ROWS and len(rows) > MAX_ROWS + 1:
+        notes.append(f"**{label}: {len(rows) - 1:,} filas; se extrajeron las primeras {MAX_ROWS:,}** "
+                     "(revisar: `--filas 0` extrae todas)")
+        return rows[:MAX_ROWS + 1]
+    return rows
+
+
 def extract_csv(src, out_dir):
-    import csv
-    raw = Path(src).read_text(encoding="utf-8-sig")
-    dialect = csv.Sniffer().sniff(raw[:4096], delimiters=",;\t|")
-    rows = list(csv.reader(raw.splitlines(), dialect))
+    raw = read_text(src)
+    try:
+        dialect = csv.Sniffer().sniff(raw[:4096], delimiters=",;\t|")
+    except csv.Error:                # una sola columna, o no se distingue: el más frecuente
+        first = raw.split("\n", 1)[0]
+        dialect = csv.excel_tab if Path(src).suffix.lower() == ".tsv" or "\t" in first else csv.excel
+        if dialect is csv.excel and first.count(";") > first.count(","):
+            class dialect(csv.excel):
+                delimiter = ";"
+    # newline="": un salto de renglón dentro de un campo entre comillas es parte del campo
+    rows = [r for r in csv.reader(io.StringIO(raw, newline=""), dialect) if any(c.strip() for c in r)]
+    notes = [f"{len(rows)} filas x {max(map(len, rows), default=0)} columnas"]
+    rows = limit_rows(rows, "CSV", notes)
     return finish(src, out_dir, {"titulo": Path(src).stem}, md_table(rows),
-                  src_words=words(raw), notes=[f"{len(rows)} filas x {max(map(len, rows), default=0)} columnas"])
+                  src_words=words(raw), notes=notes)
 
 
 def extract_docx(src, out_dir):
     import docx
     from docx.table import Table as DTable
     from docx.text.paragraph import Paragraph as DPara
-    d = docx.Document(src)
+    try:
+        d = docx.Document(src)
+    except Exception as e:
+        raise ExtractError(f"el Word no se puede abrir ({type(e).__name__}): está dañado, protegido "
+                           "o es un .doc antiguo renombrado")
     out_dir = Path(out_dir)
     assets = out_dir / "assets"
     assets.mkdir(parents=True, exist_ok=True)
     figures, parts = [], []
 
+    def run_md(r):
+        t = r.text
+        if not t.strip():
+            return t
+        lead, trail, core = t[: len(t) - len(t.lstrip())], t[len(t.rstrip()):], t.strip()
+        if r.font.name and MONO.search(r.font.name):
+            core = f"`{core}`"
+        else:
+            if r.bold:
+                core = f"**{core}**"
+            if r.italic:
+                core = f"*{core}*"
+        return lead + core + trail
+
+    def clean(s):
+        return re.sub(r"\*\*(\s+)\*\*", r"\1", s.replace("****", ""))
+
     def runs_md(p):
+        """Texto del párrafo con formato. Los hipervínculos no están en `p.runs`: hay que
+        recorrer el contenido en orden para no perder su texto ni su dirección (E5)."""
         out = []
-        for r in p.runs:
-            t = r.text
-            if not t.strip():
+        for item in p.iter_inner_content():
+            if hasattr(item, "runs"):                         # hipervínculo
+                t = clean("".join(run_md(r) for r in item.runs))
+                url = getattr(item, "url", "") or getattr(item, "address", "") or ""
+                if t.strip() and url.startswith(("http://", "https://", "mailto:")):
+                    lead, trail = t[: len(t) - len(t.lstrip())], t[len(t.rstrip()):]
+                    safe = url.replace("(", "%28").replace(")", "%29").replace(" ", "%20")
+                    t = f"{lead}[{t.strip()}]({safe}){trail}"
                 out.append(t)
-                continue
-            lead, trail, core = t[: len(t) - len(t.lstrip())], t[len(t.rstrip()):], t.strip()
-            if r.font.name and MONO.search(r.font.name):
-                core = f"`{core}`"
             else:
-                if r.bold:
-                    core = f"**{core}**"
-                if r.italic:
-                    core = f"*{core}*"
-            out.append(lead + core + trail)
-            # imágenes dentro del párrafo
-        s = "".join(out).replace("****", "")
-        return re.sub(r"\*\*(\s+)\*\*", r"\1", s)
+                out.append(run_md(item))
+        return clean("".join(out))
+
+    # Formato de cada lista (viñeta o número), leído de la numeración del documento
+    num_formats = {}
+    try:
+        root = d.part.numbering_part.element
+        abstract = {a.get(NS_W + "abstractNumId"): {
+            lvl.get(NS_W + "ilvl"): (lvl.find(NS_W + "numFmt").get(NS_W + "val")
+                                     if lvl.find(NS_W + "numFmt") is not None else "bullet")
+            for lvl in a.iter(NS_W + "lvl")} for a in root.iter(NS_W + "abstractNum")}
+        for num in root.iter(NS_W + "num"):
+            ref = num.find(NS_W + "abstractNumId")
+            for ilvl, fmt in abstract.get(ref.get(NS_W + "val") if ref is not None else None, {}).items():
+                num_formats[(int(num.get(NS_W + "numId")), int(ilvl))] = fmt
+    except Exception:
+        pass                                                  # documento sin listas numeradas
+    counters = {}
+
+    def list_item(p, style):
+        """None si el párrafo no es de lista; si lo es, su prefijo («- », «3. », con sangría)."""
+        num = p._p.pPr.numPr if p._p.pPr is not None else None
+        if num is None and not ("list" in style or "lista" in style):
+            return None
+        level = int(num.ilvl.val) if num is not None and num.ilvl is not None else 0
+        num_id = int(num.numId.val) if num is not None and num.numId is not None else style
+        fmt = num_formats.get((num_id, level))
+        if fmt is None:
+            fmt = "decimal" if re.search(r"number|n[uú]mero", style) else "bullet"
+        for k in [k for k in counters if k[0] == num_id and k[1] > level]:
+            del counters[k]                                   # una lista hija vuelve a empezar
+        if fmt in ("bullet", "none"):
+            return "   " * level + "- "
+        counters[(num_id, level)] = counters.get((num_id, level), 0) + 1
+        return "   " * level + f"{counters[(num_id, level)]}. "
 
     def images_in(p):
         names = []
@@ -1166,26 +1395,37 @@ def extract_docx(src, out_dir):
                 continue
             style = (p.style.name or "").lower() if p.style is not None else ""
             m = re.search(r"(heading|título|titulo)\s*(\d)", style)
+            prefix = None if m or style in ("title", "título", "titulo") else list_item(p, style)
             if style in ("title", "título", "titulo"):
                 parts.append("# " + p.text.strip())
             elif m:
                 parts.append("#" * min(int(m.group(2)), 3) + " " + p.text.strip())
-            elif "list" in style or "lista" in style or p._p.pPr is not None and p._p.pPr.numPr is not None:
-                parts.append("- " + text)
+            elif prefix is not None:
+                parts.append(prefix + text)
             else:
                 parts.append(text)
+                for k in [k for k in counters if isinstance(k[0], str)]:
+                    del counters[k]                           # lista por estilo: se interrumpió
         elif tag == "tbl":
             t = DTable(child, d)
-            rows = [[c.text for c in r.cells] for r in t.rows]
+            seen, rows = set(), []
+            for r in t.rows:                                  # una celda combinada: una sola vez
+                row = []
+                for c in r.cells:
+                    where = c._tc.getroottree().getpath(c._tc)
+                    row.append("" if where in seen else c.text)
+                    seen.add(where)
+                rows.append(row)
             parts.append(md_table(rows))
     # juntar ítems de lista consecutivos
-    body = ""
+    body, item = "", re.compile(r"\s*(- |\d+\. )")
     for prev, cur in zip([""] + parts, parts):
-        sep = "\n" if prev.startswith("- ") and cur.startswith("- ") else "\n\n"
+        sep = "\n" if item.match(prev) and item.match(cur) else "\n\n"
         body += (sep if body else "") + cur
     cp = d.core_properties
-    front = {"titulo": cp.title or Path(src).stem, "autor": cp.author, "subtitulo": cp.subject,
-             "palabras_clave": cp.keywords}
+    title = (cp.title or "").strip()
+    front = {"titulo": Path(src).stem if not title or JUNK_TITLE.match(title) else title,
+             "autor": cp.author, "subtitulo": cp.subject, "palabras_clave": cp.keywords}
     notes = []
     if d.sections and any(s.header and s.header.paragraphs and any(p.text.strip() for p in s.header.paragraphs)
                           for s in d.sections):
@@ -1201,22 +1441,39 @@ def extract_docx(src, out_dir):
 
 def extract_xlsx(src, out_dir):
     import openpyxl
-    wb = openpyxl.load_workbook(src, data_only=True, read_only=True)
-    wf = openpyxl.load_workbook(src, read_only=True)  # fórmulas, por si no hay valor guardado
+    try:
+        wb = openpyxl.load_workbook(src, data_only=True, read_only=True)
+        wf = openpyxl.load_workbook(src, read_only=True)  # fórmulas, por si no hay valor guardado
+    except Exception as e:
+        raise ExtractError(f"el Excel no se puede abrir ({type(e).__name__}): está dañado, protegido "
+                           "o es un .xls antiguo renombrado")
     parts, notes, n_cells = [], [], 0
+
+    def shown(c):
+        """El valor como se ve en la hoja: porcentaje con su signo, fecha sin hora (E12)."""
+        v, fmt = c.value, getattr(c, "number_format", None) or ""
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and "%" in fmt:
+            m = re.search(r"\.(0+)", fmt)
+            return f"{v * 100:.{len(m.group(1)) if m else 0}f}%"
+        if isinstance(v, dt.datetime) and v.time() == dt.time(0):
+            return v.date().isoformat()
+        return v
+
     for ws in wb.worksheets:
         frows = list(wf[ws.title].iter_rows(values_only=True))
-        rows = [[v if v is not None or i >= len(frows) or j >= len(frows[i]) else frows[i][j]
-                 for j, v in enumerate(r)]
-                for i, r in enumerate(ws.iter_rows(values_only=True))]
+        rows = [[shown(c) if c.value is not None or i >= len(frows) or j >= len(frows[i]) else frows[i][j]
+                 for j, c in enumerate(r)]
+                for i, r in enumerate(ws.iter_rows())]
         rows = [r for r in rows if any(v not in (None, "") for v in r)]
         if not rows:
             continue
         keep = [j for j in range(max(map(len, rows))) if any(j < len(r) and r[j] not in (None, "") for r in rows)]
         rows = [[r[j] if j < len(r) else "" for j in keep] for r in rows]
-        parts.append(f"## Hoja: {ws.title}\n\n{md_table(rows)}")
+        hidden = " (oculta)" if getattr(ws, "sheet_state", "visible") != "visible" else ""
+        rows = limit_rows(rows, f"Hoja '{ws.title}'", notes)
+        parts.append(f"## Hoja: {ws.title}{hidden}\n\n{md_table(rows)}")
         n_cells += sum(1 for r in rows for v in r if str(v if v is not None else "").strip())
-        notes.append(f"Hoja '{ws.title}': {len(rows)} filas x {len(keep)} columnas")
+        notes.append(f"Hoja '{ws.title}'{hidden}: {len(rows)} filas x {len(keep)} columnas")
     notes.append("Se extraen valores calculados; las fórmulas no se copian.")
     ref, ref_cells = xlsx_reference(src)
     if ref_cells != n_cells:
@@ -1227,7 +1484,11 @@ def extract_xlsx(src, out_dir):
 def extract_pptx(src, out_dir):
     from pptx import Presentation
     from pptx.enum.shapes import MSO_SHAPE_TYPE
-    prs = Presentation(src)
+    try:
+        prs = Presentation(src)
+    except Exception as e:
+        raise ExtractError(f"el PowerPoint no se puede abrir ({type(e).__name__}): está dañado, "
+                           "protegido o es un .ppt antiguo renombrado")
     out_dir = Path(out_dir)
     assets = out_dir / "assets"
     assets.mkdir(parents=True, exist_ok=True)
@@ -1242,7 +1503,8 @@ def extract_pptx(src, out_dir):
 
     for i, slide in enumerate(prs.slides, 1):
         title = slide.shapes.title.text.strip() if slide.shapes.title is not None and slide.shapes.title.has_text_frame else ""
-        sec = [f"## Diapositiva {i}" + (f": {title}" if title else "")]
+        hidden = " (oculta)" if slide._element.get("show") in ("0", "false") else ""
+        sec = [f"## Diapositiva {i}{hidden}" + (f": {title}" if title else "")]
         for sh in sorted(walk(slide.shapes), key=lambda s: (s.top or 0, s.left or 0)):
             if slide.shapes.title is not None and sh.shape_id == slide.shapes.title.shape_id:
                 continue
@@ -1276,7 +1538,9 @@ def extract_pptx(src, out_dir):
     n_img = package_count(src, r"ppt/slides/slide\d+\.xml", b"<p:pic>")
     if n_img != len(figures):
         notes.append(f"**Imágenes en el original: {n_img} | extraídas: {len(figures)}** (revisar)")
-    return finish(src, out_dir, {"titulo": cp.title or Path(src).stem, "autor": cp.author},
+    title = (cp.title or "").strip()
+    return finish(src, out_dir, {"titulo": Path(src).stem if not title or JUNK_TITLE.match(title) else title,
+                                 "autor": cp.author},
                   "\n\n".join(parts), figures, notes,
                   ref=package_reference(src, PPTX_PARTS, NS_A, skip=(NS_A + "fld",)))
 
@@ -1331,13 +1595,42 @@ def plan(src, out_root, forzar):
     return out_dir, ("respaldar" if forzar else "abortar"), why
 
 
+def pending(md, rep):
+    """Lo que el reporte pide resolver antes de dar la extracción por terminada (E13)."""
+    md_text = Path(md).read_text(encoding="utf-8", errors="replace")
+    rep_text = Path(rep).read_text(encoding="utf-8", errors="replace")
+    out = []
+    for needle, what in (("![FIGURA: describir]", "figuras por describir"),
+                         ("TRANSCRIBIR]", "páginas por transcribir"),
+                         (MARK, "símbolos sin identificar")):
+        if md_text.count(needle):
+            out.append(f"{md_text.count(needle)} {what}")
+    for needle, what in (("## Páginas que requieren revisión", "páginas que requieren revisión"),
+                         ("**Faltan", "texto del original que no se extrajo"),
+                         ("(revisar", "diferencias de cantidad con el original"),
+                         ("## Renglones de código reunidos", "renglones de código reunidos"),
+                         ("## Renglones de código que podrían", "renglones de código dudosos"),
+                         ("Guiones conservados", "guiones por confirmar"),
+                         ("sin carácter propio", "superíndices por revisar")):
+        if needle in rep_text:
+            out.append(what)
+    return out
+
+
 def main():
-    ap = argparse.ArgumentParser(description="Extrae un documento a Markdown compacto.")
+    global MAX_ROWS
+    ap = argparse.ArgumentParser(
+        description="Extrae un documento a Markdown compacto.",
+        epilog="Código de salida: 0 extraído sin pendientes; 1 extraído con pendientes "
+               "(ver reporte.md); 2 no se extrajo.")
     ap.add_argument("archivo", help="archivo a extraer (pdf, docx, pptx, xlsx, json, md, txt, csv)")
     ap.add_argument("--salida", default="extracted")
     ap.add_argument("--forzar", action="store_true",
                     help="volver a extraer aunque exista; el .md anterior se guarda como respaldo")
+    ap.add_argument("--filas", type=int, default=MAX_ROWS,
+                    help=f"filas máximas por hoja de Excel o CSV ({MAX_ROWS}); 0 = todas")
     a = ap.parse_args()
+    MAX_ROWS = max(0, a.filas)
     src = Path(a.archivo)
     if not src.is_file():
         print(f"No existe el archivo: {src}")
@@ -1349,9 +1642,14 @@ def main():
         return 2
     out_dir, action, why = plan(src, a.salida, a.forzar)
     md = out_dir / f"{out_dir.name}.md"
+    def result(md, rep):
+        todo = pending(md, rep) if Path(rep).is_file() else []
+        print("Pendientes: " + ("; ".join(todo) if todo else "ninguno"))
+        return 1 if todo else 0
+
     if action == "omitir":
         print(f"Sin cambios: {why}.\nMarkdown: {md}\nReporte:  {out_dir / 'reporte.md'}")
-        return 0
+        return result(md, out_dir / "reporte.md")
     if action == "abortar":
         print(f"No se extrajo: {why}.\nMarkdown existente: {md}\n"
               "Usa --forzar para volver a extraer (el .md actual se guarda como respaldo).")
@@ -1360,13 +1658,19 @@ def main():
         backup = md.with_name(f"{out_dir.name}.anterior.md")
         backup.write_bytes(md.read_bytes())
         print(f"Respaldo del .md anterior ({why}): {backup}")
-    md, rep = fn(src, out_dir)
+    try:
+        md, rep = fn(src, out_dir)
+    except (ExtractError, zipfile.BadZipFile) as e:
+        why = str(e) if isinstance(e, ExtractError) else \
+            "el archivo no es un documento de Office válido (dañado, o es un formato antiguo renombrado)"
+        print(f"No se extrajo: {why}.")
+        return 2
     (out_dir / "fuente.json").write_text(json.dumps({
         "archivo": src.name, "sha256": sha256(src), "md_sha256": sha256(md),
         "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     print(f"Markdown: {md}\nReporte:  {rep}")
-    return 0
+    return result(md, rep)
 
 
 if __name__ == "__main__":

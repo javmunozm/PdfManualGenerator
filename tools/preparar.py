@@ -268,7 +268,8 @@ def prepare(text):
     blocks = chapters(front, blocks, done)
     out = "---\n" + "\n".join(f"{k}: {v}" for k, v in front.items()) + "\n---\n\n" + "\n\n".join(blocks) + "\n"
     for needle, what in (("FIGURA: describir", "figuras sin describir"),
-                         ("TRANSCRIBIR", "páginas escaneadas sin transcribir")):
+                         ("TRANSCRIBIR", "páginas escaneadas sin transcribir"),
+                         ("[SIMBOLO?]", "símbolos sin identificar (marca [SIMBOLO?])")):
         if out.count(needle):
             pending.append(f"{out.count(needle)} {what}: resolver en extracted/ (docs/extractor.md, "
                            "paso 3) y volver a preparar con --forzar")

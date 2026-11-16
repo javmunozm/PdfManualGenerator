@@ -78,11 +78,12 @@ tamano: carta
 indice: si
 numerar: si
 logo: imagenes/logo.png
+idioma: es
 ---
 ```
 
 > [!NOTA]
-> Si no escribes la `fecha`, se usa la fecha del día. El `color` cambia la portada, los títulos, las tablas y las viñetas de una sola vez.
+> Si no escribes la `fecha`, se usa la fecha del día. El `color` cambia la portada, los títulos, las tablas y las viñetas de una sola vez. Con `idioma: en`, el índice, el pie de página y los rótulos de la portada salen en inglés.
 
 # Escribir el contenido
 

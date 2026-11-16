@@ -14,8 +14,10 @@ archivos de `sources/`. Si el archivo no existe, decirlo y parar.
 ## Pasos
 
 1. `python tools/extraer.py "sources/$ARGUMENTS"`
+   - Código 0: sin pendientes. Código 1: extraído, con los pendientes que lista la línea
+     «Pendientes:». Código 2: no se extrajo (el mensaje dice por qué).
    - "Sin cambios": ya está extraído; seguir con lo que hay.
-   - "No se extrajo": hay trabajo manual. No usar `--forzar` sin preguntar.
+   - "No se extrajo: ... editado a mano": hay trabajo manual. No usar `--forzar` sin preguntar.
 2. Leer **solo** `extracted/<nombre>/reporte.md`.
 3. `python tools/costo.py <nombre>` para saber el tamaño y cuánto requiere visión.
 4. Resolver los pendientes del reporte (tabla del paso 3 de `docs/extractor.md`):
@@ -29,14 +31,19 @@ archivos de `sources/`. Si el archivo no existe, decirlo y parar.
    - "Renglones de código que podrían estar partidos y no se unieron: N": quedaron como
      en el original. Leer la lista; unir a mano solo los que continúan la misma
      instrucción (un texto o un comando cortado a la mitad). Si ninguno, no hacer nada.
-   - "Símbolos sin mapa de caracteres": son NUL en el `.md`. Reemplazarlos aquí por el
-     símbolo que se ve en el original (una casilla es `[ ]`); con NUL el subagente
-     `traductor` no puede guardar esa parte.
+   - "Símbolos sin mapa de caracteres": quedan como `[SIMBOLO?]` en el `.md`.
+     Reemplazarlos aquí por el símbolo que se ve en el original (una casilla es `[ ]`);
+     `validar.py` no deja generar mientras quede alguno.
+   - "Guiones conservados": la palabra unida no aparece en otra parte del documento.
+     Si era un corte de renglón (`docu-mentación`), quitar el guion; si es un guion
+     real (`físico-químico`), dejarlo.
+   - "Superíndices o subíndices sin carácter propio": quedaron en línea (`xcrit`).
+     Revisar que no cambie el sentido; si cambia, escribirlo de otra forma (`x (crit)`).
    - Diagrama que quedó como texto suelto (rótulos en negrita solos, sin frases):
      renderizar **solo esa región** a `assets/` y pasarla a `describir-figuras` para que
      lo deje como tabla de componentes y tabla de conexiones.
 5. Comprobar que no queda nada:
-   `grep -n "describir\|TRANSCRIBIR\|^Enlaces:" extracted/<nombre>/<nombre>.md`
+   `grep -n "describir\|TRANSCRIBIR\|SIMBOLO?\|^Enlaces:" extracted/<nombre>/<nombre>.md`
 6. Informar en 6 líneas o menos: páginas, cobertura, pendientes resueltos, qué quedó.
 
 ## Presupuesto

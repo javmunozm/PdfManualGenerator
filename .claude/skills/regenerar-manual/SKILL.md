@@ -36,12 +36,17 @@ ejecute `/extraer <archivo>` (esa skill es la que autoriza usar `sources/`).
    - Validar aquí (`tools/validar.py`) y dejar 0 errores y 0 avisos en español: después
      de traducir, cada corrección hay que hacerla dos veces.
 4. ¿Manual de programación, ingeniería, física o matemática, y no es
-   `Manual_Curso_IA_Python_v2`? Entonces skill `traducir-manual` antes de seguir.
-5. `python tools/validar.py documentos/$ARGUMENTS/$ARGUMENTS.md` hasta 0 errores. Los
+   `Manual_Curso_IA_Python_v2`? Entonces se traduce, y **antes** se verifica contra el
+   original: generar el PDF en español (paso 7) y compararlo como «regenerado» en la
+   skill `verificar-pdf` (código 0; una falta aceptada se declara con `--ignorar`).
+   Después de traducir solo se puede comparar la estructura, no las palabras.
+5. Skill `traducir-manual` (solo si corresponde por el paso 4).
+6. `python tools/validar.py documentos/$ARGUMENTS/$ARGUMENTS.md` hasta 0 errores. Los
    avisos se corrigen si cambian lo que el lector ve.
-6. `python manual.py documentos/$ARGUMENTS/$ARGUMENTS.md -o output/$ARGUMENTS.pdf`
-7. Skill `verificar-pdf` con `$ARGUMENTS`.
-8. Informar en 6 líneas o menos: páginas, resultado de la verificación, qué se ajustó a
+7. `python manual.py documentos/$ARGUMENTS/$ARGUMENTS.md -o output/$ARGUMENTS.pdf --estricto`
+   (código 1 = algo se imprimió tal cual o no se imprimió: corregir el `.md`).
+8. Skill `verificar-pdf` con `$ARGUMENTS`.
+9. Informar en 6 líneas o menos: páginas, resultado de la verificación, qué se ajustó a
    mano, qué quedó pendiente.
 
 ## Presupuesto

@@ -8,6 +8,8 @@ allowed-tools:
   - Bash(python tools/comparar.py extracted/*)
   - PowerShell(python tools/comparar.py documentos/*)
   - PowerShell(python tools/comparar.py extracted/*)
+  - Bash(python tools/revisar.py output/*)
+  - PowerShell(python tools/revisar.py output/*)
 ---
 
 # Verificar `output/$ARGUMENTS.pdf`
@@ -16,33 +18,40 @@ Un PDF no está terminado hasta que `comparar.py` termina con código 0.
 
 ## 1. Contenido
 
-Elegir el origen según el caso; ninguno necesita tocar `sources/`:
+El contenido sale de `sources/` (regla 9): un manual regenerado se compara con su original.
 
 | Caso | Comando |
 |---|---|
-| Regenerado sin traducir | `python tools/comparar.py extracted/$ARGUMENTS/$ARGUMENTS.md output/$ARGUMENTS.pdf` |
+| Regenerado, original en PDF | `python tools/comparar.py "sources/<archivo>" output/$ARGUMENTS.pdf` |
+| Regenerado, original en otro formato | `python tools/comparar.py extracted/$ARGUMENTS/$ARGUMENTS.md output/$ARGUMENTS.pdf` |
 | Nuevo, actualizado o traducido | `python tools/comparar.py documentos/$ARGUMENTS/$ARGUMENTS.md output/$ARGUMENTS.pdf --estricto` |
 
-- `Faltan`, `Cifras`, `Portada`: corregir el `.md`, regenerar, repetir.
+- `<archivo>` está en `extracted/$ARGUMENTS/fuente.json`. Es el archivo que el usuario
+  autorizó con `/extraer`; el hook pedirá confirmación. Lo lee el script, no la conversación.
+- Un manual traducido ya se comparó con su original en español, antes de traducir
+  (skill `regenerar-manual`); aquí se compara con su `.md` en inglés.
+- `Faltan`, `Cifras`, `Portada`, `Estructura`: corregir el `.md`, regenerar, repetir.
+- `Plantilla` (pie, índice o idioma): si es el idioma, falta `idioma: en` en la cabecera;
+  si es el pie o el índice, es un error de `manual.py`: avisar al usuario.
 - `Aviso: sobran`: aceptable solo si es texto agregado a propósito (pies de figura,
   tablas de datos). Decirlo en el informe.
 - Una falta aceptada se declara con `--ignorar "texto"`; no se calla.
 
-## 2. Vista (una sola imagen)
+## 2. Vista (dos imágenes como máximo)
 
 ```
-python -c "import pymupdf; s=pymupdf.open('output/$ARGUMENTS.pdf'); n=min(4,len(s)); r=s[0].rect; o=pymupdf.open(); p=o.new_page(width=r.width*n,height=r.height); [p.show_pdf_page(pymupdf.Rect(i*r.width,0,(i+1)*r.width,r.height),s,i) for i in range(n)]; p.get_pixmap(dpi=58).save('output/revision.png')"
+python tools/revisar.py output/$ARGUMENTS.pdf
 ```
 
-Pasar `output/revision.png` al subagente `revisor-visual`. Si el documento tiene tablas,
-figuras o código largo, generar una segunda imagen con esas páginas (cambiar `range(n)`
-por los índices) y pasársela también. No abrir las imágenes en esta conversación.
+Crea `output/revision.png` (portada, índice, primera y última página) y, si hay tablas,
+figuras o código largo, `output/revision2.png` con esas páginas. Imprime qué página es
+cada una. Pasar las dos rutas al subagente `revisor-visual`, con esa lista de páginas, el
+idioma del manual y la aclaración de que el texto en español dentro de bloques de código
+es intencional. No abrir las imágenes en esta conversación.
 
-Para la segunda imagen elegir páginas con riesgo real: la tabla más ancha, un diagrama
-hecho con caracteres dentro de un bloque de código y la última tabla del documento. A
-58 dpi no se distingue la alineación de un diagrama: si el revisor lo marca, renderizar
-esa sola página a 110 dpi y volver a pasarla. Decirle al revisor qué páginas son y que
-el texto en español dentro de bloques de código es intencional.
+A 58 dpi no se distingue la alineación de un diagrama: si el revisor marca una página,
+verla de cerca con `python tools/revisar.py output/$ARGUMENTS.pdf --paginas N --dpi 110`
+y volver a pasarla.
 
 ## 3. Informe
 

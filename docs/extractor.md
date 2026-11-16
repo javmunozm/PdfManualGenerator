@@ -48,13 +48,20 @@ tools/comparar.py        verificación de cobertura
 
 | Formato | Cómo se extrae | Qué se conserva |
 |---|---|---|
-| `.pdf` | `tools/extraer.py` (PyMuPDF) | Texto con títulos, negrita, cursiva y código; listas; tablas; enlaces; imágenes; gráficos vectoriales; datos de portada; marcadores. |
-| `.docx` | `tools/extraer.py` (python-docx) | Títulos por estilo, formato, listas, tablas en su orden, imágenes, encabezado, propiedades. |
-| `.pptx` | `tools/extraer.py` (python-pptx) | Una sección por diapositiva, viñetas con nivel, tablas, imágenes, **datos de los gráficos** y **notas del orador**. |
-| `.xlsx` / `.xlsm` | `tools/extraer.py` (openpyxl) | Una tabla por hoja, sin filas ni columnas vacías. Valores calculados; si no hay valor guardado, la fórmula. |
+| `.pdf` | `tools/extraer.py` (PyMuPDF) | Texto con títulos, negrita, cursiva y código; superíndices y subíndices; listas; tablas; enlaces en su frase; imágenes (JPEG tal cual, transparencia conservada, una referencia por cada aparición); gráficos vectoriales; datos de portada; marcadores. |
+| `.docx` | `tools/extraer.py` (python-docx) | Títulos por estilo, formato, hipervínculos con su dirección, listas con viñetas o numeradas y su nivel, tablas en su orden (una celda combinada, una sola vez), imágenes, encabezado, propiedades. |
+| `.pptx` | `tools/extraer.py` (python-pptx) | Una sección por diapositiva (las ocultas, marcadas `(oculta)`), viñetas con nivel, tablas, imágenes, **datos de los gráficos** y **notas del orador**. |
+| `.xlsx` / `.xlsm` | `tools/extraer.py` (openpyxl) | Una tabla por hoja (las ocultas, marcadas `(oculta)`), sin filas ni columnas vacías. Valores calculados; si no hay valor guardado, la fórmula. Porcentajes con su signo y fechas sin hora. |
 | `.json` | `tools/extraer.py` | Listas de objetos → tablas (las claves se escriben una sola vez); objetos → listas `clave: valor`. |
-| `.csv` / `.tsv` | `tools/extraer.py` | Tabla Markdown (detecta `,` `;` tab o `|`). |
+| `.csv` / `.tsv` | `tools/extraer.py` | Tabla Markdown (detecta `,` `;` tab o `|`; una sola columna también). Un salto de renglón dentro de un campo queda como `<br>`. |
 | `.md` / `.txt` | `tools/extraer.py` | Se conserva tal cual; solo se limpian espacios y líneas vacías sobrantes. |
+
+Los archivos de texto se leen en UTF-8, UTF-16 o cp1252 (lo que guardan Excel y el Bloc
+de notas de Windows). Un archivo protegido con contraseña o dañado termina en un mensaje
+de una línea y código 2.
+
+| Formato | Cómo se extrae | Qué se conserva |
+|---|---|---|
 | `.doc` `.ppt` `.xls` `.odt` `.rtf` | Convertir primero: `soffice --headless --convert-to docx archivo.doc` (o `pdf`). Sin LibreOffice: abrir y "Guardar como" `.docx`/`.xlsx`/`.pptx`. | Igual que el formato convertido. |
 | `.html` | Guardar como PDF desde el navegador (o `pandoc archivo.html -o archivo.docx`) y extraer ese archivo. | Igual que el formato convertido. |
 | Imagen (`.png`, `.jpg`) o PDF escaneado | Lectura visual: abrir la imagen y transcribir. No hay OCR (Tesseract) instalado. | Transcripción literal + descripción de lo visual. |
@@ -71,7 +78,16 @@ Requisitos: `pip install -r requirements.txt`.
 python tools/extraer.py sources/<archivo>
 ```
 
-La terminal solo muestra dos rutas. No imprimir el Markdown completo.
+La terminal muestra dos rutas y una línea «Pendientes:». No imprimir el Markdown completo.
+
+| Código | Significa |
+|---|---|
+| 0 | Extraído y sin pendientes. |
+| 1 | Extraído, con pendientes: los nombra la línea «Pendientes:» y los detalla `reporte.md`. |
+| 2 | No se extrajo: formato no admitido, archivo protegido o dañado, o hay trabajo manual que se pisaría. |
+
+Las hojas de Excel y los CSV de más de 2.000 filas se recortan y el reporte lo dice;
+`--filas 0` extrae todas.
 
 ### Paso 2: leer el reporte (siempre primero)
 
@@ -81,7 +97,9 @@ extracted/<nombre>/reporte.md
 
 Indica: páginas, títulos detectados, tamaño aproximado en tokens, cobertura de palabras
 y la lista de pendientes. Si dice **"Cobertura 100% en todas las páginas; sin
-observaciones"** y no hay figuras pendientes, la extracción está terminada.
+observaciones"** y no hay figuras pendientes, la extracción está terminada (código 0).
+La sección «Notas (no requieren acción)» es informativa: portada pasada a la cabecera,
+índice original omitido. Solo figuran como pendientes las figuras sin pie.
 
 ### Paso 3: resolver los pendientes (solo los que aparecen)
 
@@ -98,7 +116,10 @@ observaciones"** y no hay figuras pendientes, la extracción está terminada.
 | **Texto único en la zona de encabezado/pie, conservado en el cuerpo** | Suele ser una nota al pie: aparece una sola vez, así que no se trató como pie repetido. | Dejarlo donde corresponde (junto a su llamada) o borrarlo si de verdad era un pie. |
 | **Renglones de código reunidos** | El extractor unió renglones que el original partió por falta de ancho. Une solo si se dan tres cosas: la primera palabra del siguiente no cabía al final del anterior, el siguiente empieza en el borde izquierdo, y el anterior quedó a medias (comillas o paréntesis sin cerrar, o termina en coma u operador). El reporte lista cada unión al final, con su página. | Revisar **todas**: si lo unido es otra instrucción, separarlo en su propio renglón con su sangría. |
 | **Renglones de código que podrían estar partidos (no se unieron)** | No cabían juntos, pero el segundo tiene sangría propia o el primero está completo (o es un comentario): se dejaron como en el original. | Leer la lista. Unir a mano solo los que continúan la misma instrucción. |
-| **Símbolos sin mapa de caracteres** | La fuente del original no dice qué carácter es (casillas, flechas): quedan como NUL en el `.md`. `validar.py` los rechaza. | Reemplazar cada uno por el símbolo que se ve en esa página (una casilla vacía: `[ ]`). |
+| **Símbolos sin mapa de caracteres** | La fuente del original no dice qué carácter es (casillas, flechas): quedan como `[SIMBOLO?]` en el `.md`. `validar.py` los rechaza. | Reemplazar cada uno por el símbolo que se ve en esa página (una casilla vacía: `[ ]`). |
+| **Guiones conservados al final de un renglón** | Un renglón terminaba en guion y la palabra unida no aparece en otra parte del documento: puede ser un corte (`docu-mentación`) o un guion real (`físico-químico`). Se dejó con guion. | Quitar el guion si era un corte de renglón. |
+| **Superíndices o subíndices sin carácter propio** | Los que tienen carácter propio se conservan (`10³`, `H₂O`); el resto quedó en línea (`xcrit`). | Revisar que el sentido no cambie; si cambia, escribirlo de otra forma. |
+| **Hoja o CSV: N filas; se extrajeron las primeras M** | La tabla pasa del límite de filas. | Si hacen falta todas: `--filas 0 --forzar`. Para cálculos, usar un script sobre el original. |
 
 Para abrir imágenes, usar las de `assets/` (ya recortadas y en resolución moderada).
 Nunca renderizar todas las páginas.
@@ -109,7 +130,7 @@ La extracción está completa cuando se cumple todo:
 
 - [ ] `reporte.md` muestra 100% de cobertura en todas las páginas (o los faltantes se agregaron a mano).
 - [ ] No queda ningún `FIGURA: describir`, `TRANSCRIBIR` ni tabla sin reconstruir:
-      `grep -n "describir\|TRANSCRIBIR" extracted/<nombre>/<nombre>.md` no devuelve nada.
+      `grep -n "describir\|TRANSCRIBIR\|SIMBOLO?" extracted/<nombre>/<nombre>.md` no devuelve nada.
 - [ ] Los títulos detectados coinciden con los marcadores del PDF original (cuando los tiene).
 - [ ] Los enlaces conservan su URL (`[texto](url)` o línea `Enlaces:` al final de la página).
 - [ ] La portada y los encabezados/pies quedaron en la cabecera o en comentarios.
@@ -161,7 +182,8 @@ información para quien lea el `.md`.
 | Problema | Causa | Solución |
 |---|---|---|
 | Texto con letras raras o vacío | PDF escaneado o con fuentes sin mapa de caracteres. | El reporte lo marca como escaneado: transcribir desde la imagen. |
-| Palabras pegadas o cortadas con guion | Corte de línea del original. | El extractor une los cortes `pala-\nbra`; revisar casos con guion real. |
+| Palabras pegadas o cortadas con guion | Corte de línea del original. | El extractor une `pala-` + `bra` solo si «palabra» aparece en otra parte del documento. Si no, deja el guion y lo lista en el reporte para decidir. |
+| Texto extraído con `[SIMBOLO?]` | La fuente del original no dice qué carácter es. | Reemplazarlo por el símbolo que se ve en esa página. |
 | Un párrafo partido en dos | Continúa en la página siguiente. | Unirlo al preparar el documento (generator.md). |
 | Bloque de código dividido | Cambio de página en el original. | Unir los dos bloques al preparar el documento. |
 | Código sin sangría o con renglones partidos | El PDF da la sangría por posición y parte los renglones largos. | El extractor los reconstruye (sangría por posición, renglones reunidos). Sin recuadro de fondo ni texto normal en el documento no puede saber el ancho y no reúne nada. |

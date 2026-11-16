@@ -31,6 +31,7 @@ from reportlab.platypus import (
     ListFlowable, ListItem, NextPageTemplate, PageBreak, PageTemplate,
     Paragraph, Spacer, Table, TableStyle,
 )
+from reportlab.platypus.doctemplate import LayoutError
 from reportlab.platypus.tableofcontents import TableOfContents
 
 for _s in (sys.stdout, sys.stderr):   # la consola de Windows (cp1252) no admite todo Unicode
@@ -55,7 +56,34 @@ DEFAULTS = {
     "logo": "",               # ruta a una imagen para la portada
     "palabras_clave": "",
     "dpi_imagenes": "150",    # resolución máxima de las imágenes
+    "idioma": "es",           # es / en: idioma de los textos que pone la plantilla
 }
+
+# Textos fijos que pone la plantilla, por idioma (campo `idioma` de la cabecera).
+# tools/comparar.py y tools/validar.py leen esta misma tabla.
+TEXTOS = {
+    "es": {"indice": "Índice", "pagina": "Página {page} de {total}",
+           "curso": "Curso", "autor": "Autor", "version": "Versión", "fecha": "Fecha",
+           "sin_imagen": "Imagen no encontrada",
+           "NOTA": "Nota", "CONSEJO": "Consejo", "ADVERTENCIA": "Advertencia",
+           "IMPORTANTE": "Importante", "EJERCICIO": "Ejercicio"},
+    "en": {"indice": "Contents", "pagina": "Page {page} of {total}",
+           "curso": "Course", "autor": "Author", "version": "Version", "fecha": "Date",
+           "sin_imagen": "Image not found",
+           "NOTA": "Note", "CONSEJO": "Tip", "ADVERTENCIA": "Warning",
+           "IMPORTANTE": "Important", "EJERCICIO": "Exercise"},
+}
+IDIOMAS = {"es": "es", "español": "es", "espanol": "es", "spanish": "es",
+           "en": "en", "english": "en", "inglés": "en", "ingles": "en"}
+
+
+def idioma(cfg):
+    """Código del idioma del documento (es o en); un valor desconocido cuenta como es."""
+    return IDIOMAS.get(str(cfg.get("idioma", "es")).strip().lower(), "es")
+
+
+def textos(cfg):
+    return TEXTOS[idioma(cfg)]
 
 CALLOUTS = {
     "NOTA":        ("Nota",        "#2E75B6", "#EAF2FB"),
@@ -67,6 +95,100 @@ CALLOUTS = {
 
 GRIS = colors.HexColor("#595959")
 GRIS_CLARO = colors.HexColor("#D9D9D9")
+
+
+# ---------------------------------------------------------------------------
+# Fuentes de respaldo (G4). Helvetica y Courier solo traen los caracteres de Windows
+# (cp1252). Lo demás (subíndices, flechas, griego, casillas, cirílico) se escribe con
+# DejaVu Sans, que está en fonts/. Si esa carpeta falta, queda como antes: esos caracteres
+# salen como ■ y tools/validar.py los informa.
+# ---------------------------------------------------------------------------
+FONT_DIR = Path(__file__).resolve().parent / "fonts"
+RESPALDO = {}                         # nombre de la fuente -> códigos que tiene
+
+
+def _registrar_fuentes():
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    for name in ("DejaVuSans", "DejaVuSansMono"):
+        path = FONT_DIR / f"{name}.ttf"
+        if path.is_file():
+            try:
+                font = TTFont(name, str(path))
+                pdfmetrics.registerFont(font)
+                RESPALDO[name] = font.face.charToGlyph
+            except Exception:
+                pass                  # archivo dañado: se sigue sin respaldo
+
+
+_registrar_fuentes()
+
+
+def _encodable(ch, enc, cache={}):
+    if (ch, enc) not in cache:
+        try:
+            ch.encode(enc)
+            cache[ch, enc] = True
+        except (UnicodeError, LookupError):
+            cache[ch, enc] = False
+    return cache[ch, enc]
+
+
+def font_for(ch, mono=False):
+    """Fuente con la que se escribe un carácter: None = la normal del texto; un nombre =
+    fuente de respaldo; "" = no hay glifo (sale como ■)."""
+    if ord(ch) < 127 or ch.isspace() or _encodable(ch, "WinAnsiEncoding"):
+        return None
+    order = ("DejaVuSansMono", "DejaVuSans") if mono else ("DejaVuSans", "DejaVuSansMono")
+    for name in order:
+        if ord(ch) in RESPALDO.get(name, ()):
+            return name
+    if _encodable(ch, "SymbolEncoding") or _encodable(ch, "ZapfDingbatsEncoding"):
+        return None                   # ReportLab lo sustituye solo (sin respaldo instalado)
+    return ""
+
+
+def has_glyph(ch):
+    return font_for(ch) != ""
+
+
+def runs(text, mono=False):
+    """Parte un texto en tramos [(fuente de respaldo o None, texto)]."""
+    out = []
+    for ch in text:
+        f = font_for(ch, mono) or None
+        if out and out[-1][0] == f:
+            out[-1][1] += ch
+        else:
+            out.append([f, ch])
+    return out
+
+
+def with_fallback(markup, mono=False):
+    """Marca con <font> los caracteres que la fuente normal no tiene. `markup` ya está
+    escapado; las etiquetas no se tocan."""
+    if markup.isascii():
+        return markup
+    parts = re.split(r"(<[^>]*>)", markup)
+    for i in range(0, len(parts), 2):
+        parts[i] = "".join(f'<font face="{f}">{t}</font>' if f else t
+                           for f, t in runs(parts[i], mono))
+    return "".join(parts)
+
+
+def text_width(text, font, size):
+    return sum(stringWidth(t, f or font, size) for f, t in runs(text, "Courier" in font))
+
+
+def draw_text(c, x, y, text, font, size, right=False):
+    """drawString que cambia a la fuente de respaldo donde hace falta."""
+    if right:
+        x -= text_width(text, font, size)
+    for f, t in runs(text, "Courier" in font):
+        c.setFont(f or font, size)
+        c.drawString(x, y, t)
+        x += stringWidth(t, f or font, size)
+    c.setFont(font, size)
 
 
 # ---------------------------------------------------------------------------
@@ -157,10 +279,11 @@ def inline(text, link_color="#1F4E79", br=False):
                     rf'<link href="\2" color="{link_color}"><u>\1</u></link>', text)
     if balanced(linked):
         text = linked
+    text = with_fallback(text)
     text = re.sub(
         "\x00(\\d+)\x00",
         lambda m: ('<font face="Courier" size="9.5" backColor="#EFEFEF">'
-                   f"{escape(codes[int(m.group(1))])}</font>"),
+                   f"{with_fallback(escape(codes[int(m.group(1))]), mono=True)}</font>"),
         text,
     )
     return text
@@ -245,11 +368,18 @@ class CodeBlock(Flowable):
                          (x, y + self.size * 0.25, x + 1.3 * cw, y + self.size * 0.25)])
             y -= self.leading
         c.setFillColor(colors.HexColor("#262626"))
-        tx = c.beginText(x0, self.height - self.PAD - self.size)
-        tx.setFont(self.FONT, self.size, self.leading)
+        y = self.height - self.PAD - self.size
         for text, _ in self.rows:
-            tx.textLine(text)
-        c.drawText(tx)
+            if text.isascii():
+                c.setFont(self.FONT, self.size)
+                c.drawString(x0, y, text)
+            else:                     # cada tramo en su columna: el diagrama no se desalinea
+                col = 0
+                for f, t in runs(text, mono=True):
+                    c.setFont(f or self.FONT, self.size)
+                    c.drawString(x0 + col * cw, y, t)
+                    col += len(t)
+            y -= self.leading
 
 
 # ---------------------------------------------------------------------------
@@ -298,10 +428,50 @@ def parse_front_matter(text):
                 for raw in lines[1:i]:
                     if ":" in raw and not raw.lstrip().startswith("#"):
                         k, v = raw.split(":", 1)
-                        cfg[k.strip().lower()] = v.strip().strip('"').strip("'")
+                        k, v = k.strip().lower(), v.strip().strip('"').strip("'")
+                        if v or k not in SIN_VACIO:   # `fecha:` vacía = la de hoy (G13)
+                            cfg[k] = v
                 cfg["_body_line"] = i + 1         # líneas que ocupa la cabecera
                 return cfg, "\n".join(lines[i + 1:])
     return cfg, text
+
+
+# Campos que, escritos sin valor, conservan su valor por defecto
+SIN_VACIO = {"titulo", "fecha", "color", "tamano", "indice", "numerar", "dpi_imagenes", "idioma"}
+
+
+class ConfigError(Exception):
+    """La cabecera tiene un valor con el que no se puede generar el PDF."""
+
+
+def check_config(cfg):
+    if not re.fullmatch(r"#[0-9A-Fa-f]{6}", cfg["color"]):
+        raise ConfigError(f"cabecera: color «{cfg['color']}» no es un color #RRGGBB (ejemplo: #1F4E79)")
+    if not cfg["dpi_imagenes"].isdigit() or int(cfg["dpi_imagenes"]) < 1:
+        raise ConfigError(f"cabecera: dpi_imagenes «{cfg['dpi_imagenes']}» no es un número (ejemplo: 150)")
+
+
+def fit(text, font, size, width):
+    """El texto, recortado con «…» si no cabe en ese ancho (encabezado, pie, portada)."""
+    if text_width(text, font, size) <= width:
+        return text
+    while text and text_width(text + "…", font, size) > width:
+        text = text[:-1]
+    return text.rstrip() + "…"
+
+
+class SplitTable(Table):
+    """Tabla que parte una fila por dentro solo cuando esa fila no cabe en una página
+    entera (G2). En los demás casos la fila pasa completa a la página siguiente."""
+    FULL = 0                      # alto útil de una página; lo fija build_pdf
+
+    def split(self, availWidth, availHeight):
+        self.splitInRow = 0
+        parts = super().split(availWidth, availHeight)
+        if not parts and availHeight >= 0.85 * self.FULL:
+            self.splitInRow = 1
+            parts = super().split(availWidth, availHeight)
+        return parts
 
 
 def split_row(row):
@@ -331,6 +501,9 @@ def split_row(row):
     return cells
 
 
+ITEM = re.compile(r"(\s*)([-*+]|\d+[.)])\s+(.*)")       # ítem de lista: sangría, marca, texto
+
+
 class Builder:
     def __init__(self, cfg, styles, base_dir, frame_w, frame_h):
         self.cfg = cfg
@@ -338,6 +511,7 @@ class Builder:
         self.base = base_dir
         self.fw, self.fh = frame_w, frame_h
         self.primary = colors.HexColor(cfg["color"])
+        self.t = textos(cfg)
         self.link = cfg["color"]
         self.numerar = cfg["numerar"].lower() in ("si", "sí", "yes", "true", "1")
         self.counters = [0, 0, 0]
@@ -347,9 +521,11 @@ class Builder:
         self.line = 0             # línea del .md que se está leyendo
         self.first_line = 0       # líneas que ocupa la cabecera
         self.warnings = []
+        self.no_glyph = set()
 
     def para(self, text, style, link=None, br=False):
         """Párrafo con formato en línea. Si no se puede interpretar, se imprime literal."""
+        self.glyphs(text)
         try:
             return Paragraph(inline(text, link or self.link, br), style)
         except ValueError:
@@ -366,7 +542,7 @@ class Builder:
         for j in range(lvl + 1, 3):
             self.counters[j] = 0
         label = text
-        if self.numerar:
+        if self.numerar and self.counters[0]:     # una sección sin capítulo no se numera (0.1)
             num = ".".join(str(n) for n in self.counters[:lvl + 1])
             label = f"{num}{'.' if lvl == 0 else ''}  {text}"
         if lvl == 0:
@@ -378,7 +554,8 @@ class Builder:
         para = self.para(label, self.s[f"h{level}"])
         self.bm += 1
         para._toc_level = lvl
-        para._toc_text = re.sub(r"[`*]", "", label.replace("  ", " "))
+        plain = re.sub(r"\[([^\]]+)\]\((?:https?://|mailto:)[^)\s]+\)", r"\1", label)
+        para._toc_text = re.sub(r"[`*]", "", plain.replace("  ", " "))   # sin formato ni enlaces
         para._bm_key = f"h{self.bm}"
         self.story.append(para)
         if lvl == 0:
@@ -427,7 +604,7 @@ class Builder:
         cells = [r + [""] * (ncols - len(r)) for r in cells]
         data = [[self.para(c, self.s["cell_head"], "#FFFFFF", br=True) for c in cells[0]]]
         data += [[self.para(c, self.s["cell"], br=True) for c in r] for r in cells[1:]]
-        t = Table(data, colWidths=self.col_widths(cells), repeatRows=1, hAlign="LEFT")
+        t = SplitTable(data, colWidths=self.col_widths(cells), repeatRows=1, hAlign="LEFT")
         style = [
             ("BACKGROUND", (0, 0), (-1, 0), self.primary),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -442,46 +619,77 @@ class Builder:
         t.setStyle(TableStyle(style))
         self.story += [t, Spacer(1, 10)]
 
-    def lst(self, items, ordered):
-        flow = ListFlowable(
-            [ListItem(self.p(it, "list"), leftIndent=16) for it in items],
-            bulletType="1" if ordered else "bullet",
-            start="1" if ordered else "•",
-            bulletFormat="%s." if ordered else None,
-            bulletColor=self.primary,
-            bulletFontName="Helvetica-Bold",
-            bulletFontSize=10 if ordered else 11,
-            leftIndent=16,
-        )
-        self.story += [flow, Spacer(1, 6)]
+    def lst(self, entries):
+        """Listas a partir de [(sangría, numerada, número escrito, texto)]. Una lista
+        numerada empieza en el número que trae escrito (G3) y un ítem con más sangría
+        que el anterior abre una lista dentro de ese ítem (G17)."""
+        def make(k, depth):
+            indent, ordered, first = entries[k][0], entries[k][1], entries[k][2]
+            items = []
+            while k < len(entries) and entries[k][0] >= indent:
+                if entries[k][0] >= indent + 2 and items:      # más adentro: lista hija
+                    sub, k = make(k, depth + 1)
+                    items[-1].append(sub)
+                elif entries[k][1] != ordered:                 # cambia de tipo: otra lista
+                    break
+                else:
+                    items.append([self.p(entries[k][3], "list")])
+                    k += 1
+            flow = ListFlowable(
+                [ListItem(parts, leftIndent=16) for parts in items],
+                bulletType="1" if ordered else "bullet",
+                start=str(first) if ordered else ("•", "–")[depth % 2],
+                bulletFormat="%s." if ordered else None,
+                bulletColor=self.primary,
+                bulletFontName="Helvetica-Bold",
+                bulletFontSize=10 if ordered else 11,
+                leftIndent=16,
+            )
+            return flow, k
+
+        k = 0
+        while k < len(entries):
+            flow, k = make(k, 0)
+            self.story.append(flow)
+        self.story.append(Spacer(1, 6))
 
     def quote(self, lines):
         m = re.match(r"\[!(\w+)\]\s*(.*)", lines[0].strip()) if lines else None
         if m and m.group(1).upper() in CALLOUTS:
             name, border, bg = CALLOUTS[m.group(1).upper()]
-            title = m.group(2) or name
+            title = m.group(2) or self.t[m.group(1).upper()]
             body_lines = lines[1:]
         else:
             name, border, bg, title, body_lines = None, "#A6A6A6", None, None, lines
 
-        content = []
+        # Una fila por párrafo: así un cuadro largo puede seguir en la página siguiente (G2)
+        content, sizes = [], []
         if title:
             ts = ParagraphStyle("ct", parent=self.s["callout_title"],
                                 textColor=colors.HexColor(border))
-            content.append(self.para(title, ts))
+            content.append([self.para(title, ts)])
         for para in "\n".join(body_lines).split("\n\n"):
             para = " ".join(x.strip() for x in para.splitlines()).strip()
             if para:
-                content.append(self.p(para, "callout" if name else "quote"))
+                content.append([self.p(para, "callout" if name else "quote")])
+                sizes.append(len(para))
+        if not content:
+            return
 
-        t = Table([[content]], colWidths=[self.fw])
+        t = SplitTable(content, colWidths=[self.fw])
         style = [
             ("LINEBEFORE", (0, 0), (0, -1), 3, colors.HexColor(border)),
             ("LEFTPADDING", (0, 0), (-1, -1), 10),
             ("RIGHTPADDING", (0, 0), (-1, -1), 10),
-            ("TOPPADDING", (0, 0), (-1, -1), 7),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, 0), 7),
+            ("BOTTOMPADDING", (0, -1), (-1, -1), 5),
         ]
+        # El título no queda solo al final de una página. Solo con un primer párrafo
+        # corto: si título y párrafo no caben juntos en una página, ReportLab no termina.
+        if title and sizes and sizes[0] < 1200:
+            style.append(("NOSPLIT", (0, 0), (-1, 1)))
         if bg:
             style.append(("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(bg)))
         t.setStyle(TableStyle(style))
@@ -489,14 +697,33 @@ class Builder:
 
     def image(self, caption, src):
         path = (self.base / src).resolve()
-        if not path.exists():
-            self.story.append(self.p(f"**[Imagen no encontrada: {src}]**"))
+        if "FIGURA: describir" in caption or "TRANSCRIBIR" in caption:
+            self.warn("figura sin describir o página sin transcribir: el pie se imprimió tal cual")
+        if not path.is_file():
+            self.warn(f"imagen no encontrada: {src}")
+            self.story.append(self.p(f"**[{self.t['sin_imagen']}: {src}]**"))
             return
         img = load_image(path, self.fw, self.fh * 0.6, int(self.cfg["dpi_imagenes"]))
         parts = [img]
         if caption:
             parts.append(self.p(caption, "caption"))
+        # Un título seguido de una figura no queda solo al final de la página (G12)
+        if len(self.story) > 1 and getattr(self.story[-1], "_toc_level", 0) \
+                and isinstance(self.story[-2], CondPageBreak):
+            self.story[-2] = CondPageBreak(img.drawHeight + 80)
         self.story.append(KeepTogether(parts))
+
+    def warn(self, msg):
+        self.warnings.append(f"l.{self.line}: {msg}")
+
+    def glyphs(self, text):
+        """Avisa, una vez por carácter, de los que ninguna fuente tiene (salen como ■)."""
+        if text.isascii():
+            return
+        missing = sorted({ch for ch in text if font_for(ch) == ""} - self.no_glyph)
+        if missing:
+            self.no_glyph.update(missing)
+            self.warn("caracteres sin glifo en las fuentes del PDF (salen como ■): " + " ".join(missing))
 
     # --- recorrido línea por línea -----------------------------------------
     def build(self, text):
@@ -523,6 +750,9 @@ class Builder:
                 i += 1
                 while i < len(lines) and not lines[i].strip().startswith("```"):
                     code.append(lines[i]); i += 1
+                if i >= len(lines):
+                    self.warn("bloque de código sin cerrar: el resto del documento salió como código")
+                self.glyphs("".join(code))
                 self.story += [CodeBlock(code or [""], self.primary), Spacer(1, 10)]
                 i += 1; continue
 
@@ -533,7 +763,16 @@ class Builder:
                 flush()
                 while i < len(lines) and "-->" not in lines[i]:
                     i += 1
+                if i >= len(lines):
+                    self.warn("comentario sin cerrar: el resto del documento no se imprimió")
+                elif lines[i].split("-->", 1)[1].strip():
+                    self.warn("hay texto después de --> en la misma línea: no se imprimió")
                 i += 1; continue
+
+            if re.fullmatch(r"(-{3,}|\*{3,}|_{3,})", st):
+                self.warn("línea horizontal: no se admite; se imprimió tal cual")
+            elif re.match(r"#{4,}\s", st):
+                self.warn("título de nivel 4 o más: solo hay 3 niveles; salió como texto")
 
             m = re.match(r"(#{1,3})\s+(.*)", st)
             if m:
@@ -557,22 +796,25 @@ class Builder:
                     q.append(re.sub(r"^\s*>\s?", "", lines[i])); i += 1
                 self.quote(q); continue
 
-            bullet = re.match(r"\s*[-*+]\s+(.*)", line)
-            number = re.match(r"\s*\d+[.)]\s+(.*)", line)
-            if bullet or number:
+            if ITEM.match(line) and not re.fullmatch(r"(\*{3,}|-{3,})", st):
                 flush()
-                ordered = bool(number)
-                pat = r"\s*\d+[.)]\s+(.*)" if ordered else r"\s*[-*+]\s+(.*)"
-                items = []
+                entries = []                # (sangría, numerada, número escrito, texto)
                 while i < len(lines):
-                    mm = re.match(pat, lines[i])
+                    mm = ITEM.match(lines[i])
                     if mm:
-                        items.append(mm.group(1)); i += 1
-                    elif lines[i].strip() and lines[i].startswith("  ") and items:
-                        items[-1] += " " + lines[i].strip(); i += 1
+                        mark = mm.group(2)
+                        entries.append([len(mm.group(1).expandtabs(4)), mark[0].isdigit(),
+                                        int(mark[:-1]) if mark[0].isdigit() else 0, mm.group(3)])
+                        i += 1
+                    elif lines[i].strip() and lines[i].startswith("  "):
+                        entries[-1][3] += " " + lines[i].strip(); i += 1
+                    elif not lines[i].strip() and i + 1 < len(lines) and (
+                            lambda nx: nx and (nx.group(2)[0].isdigit() == entries[0][1]
+                                               or len(nx.group(1)) >= 2))(ITEM.match(lines[i + 1])):
+                        i += 1              # línea vacía entre ítems: la lista sigue (G3)
                     else:
                         break
-                self.lst(items, ordered); continue
+                self.lst(entries); continue
 
             para.append(line); i += 1
 
@@ -604,6 +846,7 @@ class ManualDoc(BaseDocTemplate):
         super().__init__(filename, **kw)
         self.cfg = cfg
         self.primary = colors.HexColor(cfg["color"])
+        self.t = textos(cfg)
         self.page_chapters = {}
         self._last_level = -1
         frame = Frame(self.leftMargin, self.bottomMargin, self.width, self.height, id="f")
@@ -620,12 +863,16 @@ class ManualDoc(BaseDocTemplate):
         self._last_level = level
         self.canv.bookmarkPage(f._bm_key)
         self.canv.addOutlineEntry(f._toc_text, f._bm_key, level=level, closed=level > 0)
-        self.notify("TOCEntry", (level, escape(f._toc_text), self.page, f._bm_key))
+        self.notify("TOCEntry", (level, with_fallback(escape(f._toc_text)), self.page, f._bm_key))
         if level == 0:
             self.page_chapters[self.page] = f._toc_text
 
     def handle_documentBegin(self):
+        # multiBuild arma el documento varias veces (el índice cambia la paginación).
+        # Lo anotado en una pasada no sirve para la siguiente: sin vaciarlo, el pie
+        # mezclaba las páginas de la primera pasada con las de la última (G5).
         self._last_level = -1
+        self.page_chapters = {}
         super().handle_documentBegin()
 
     # --- portada -----------------------------------------------------------
@@ -644,16 +891,16 @@ class ManualDoc(BaseDocTemplate):
         if cfg["institucion"]:
             st = ParagraphStyle("ins", fontName="Helvetica-Bold", fontSize=10,
                                 leading=13, textColor=colors.HexColor("#D6E4F0"))
-            p = Paragraph(escape(cfg["institucion"].upper()), st)
+            p = Paragraph(with_fallback(escape(cfg["institucion"].upper())), st)
             _, ph = p.wrap(w, H)
             p.drawOn(c, x, H - 2.5 * cm - ph)
 
         blocks = []
-        blocks.append(Paragraph(escape(cfg["titulo"]), ParagraphStyle(
+        blocks.append(Paragraph(with_fallback(escape(cfg["titulo"])), ParagraphStyle(
             "ct", fontName="Helvetica-Bold", fontSize=32, leading=38,
             textColor=colors.white)))
         if cfg["subtitulo"]:
-            blocks.append(Paragraph(escape(cfg["subtitulo"]), ParagraphStyle(
+            blocks.append(Paragraph(with_fallback(escape(cfg["subtitulo"])), ParagraphStyle(
                 "cs", fontName="Helvetica", fontSize=15, leading=20,
                 textColor=colors.HexColor("#E8EEF4"))))
         for p in reversed(blocks):
@@ -662,16 +909,14 @@ class ManualDoc(BaseDocTemplate):
             y += ph + 10
 
         # Datos bajo la banda
-        info = [(k, cfg[v]) for k, v in (("Curso", "curso"), ("Autor", "autor"),
-                ("Versión", "version"), ("Fecha", "fecha")) if cfg[v]]
+        info = [(self.t[k], cfg[k]) for k in ("curso", "autor", "version", "fecha") if cfg[k]]
         y = H - band_h - 2.2 * cm
         for label, value in info:
             c.setFillColor(GRIS)
             c.setFont("Helvetica", 9)
             c.drawString(x, y, label.upper())
             c.setFillColor(colors.HexColor("#262626"))
-            c.setFont("Helvetica-Bold", 12)
-            c.drawString(x, y - 15, value)
+            draw_text(c, x, y - 15, fit(value, "Helvetica-Bold", 12, w), "Helvetica-Bold", 12)
             y -= 1.4 * cm
 
         if cfg["logo"]:
@@ -701,16 +946,22 @@ def header_footer(c, doc, page, total):
     c.line(lm, H - 1.6 * cm, rm, H - 1.6 * cm)
     c.setFont("Helvetica", 8.5)
     c.setFillColor(GRIS)
-    c.drawString(lm, H - 1.6 * cm + 5, cfg["titulo"])
-    if cfg["curso"]:
-        c.drawRightString(rm, H - 1.6 * cm + 5, cfg["curso"])
+    # Los textos largos se recortan: no se montan uno sobre otro ni pasan el margen (G11)
+    full, gap = rm - lm, 14
+    curso = fit(cfg["curso"], "Helvetica", 8.5, 0.4 * full)
+    draw_text(c, lm, H - 1.6 * cm + 5, fit(cfg["titulo"], "Helvetica", 8.5, full - gap
+                                           - text_width(curso, "Helvetica", 8.5)), "Helvetica", 8.5)
+    if curso:
+        draw_text(c, rm, H - 1.6 * cm + 5, curso, "Helvetica", 8.5, right=True)
     # Pie
+    label = doc.t["pagina"].format(page=page, total=total)
     c.setStrokeColor(GRIS_CLARO)
     c.line(lm, 1.6 * cm, rm, 1.6 * cm)
-    c.drawString(lm, 1.6 * cm - 12, chapter)
+    draw_text(c, lm, 1.6 * cm - 12, fit(chapter, "Helvetica", 8.5, full - gap
+                                        - stringWidth(label, "Helvetica-Bold", 8.5)), "Helvetica", 8.5)
     c.setFillColor(doc.primary)
     c.setFont("Helvetica-Bold", 8.5)
-    c.drawRightString(rm, 1.6 * cm - 12, f"Página {page} de {total}")
+    c.drawRightString(rm, 1.6 * cm - 12, label)
     c.restoreState()
 
 
@@ -745,7 +996,9 @@ def build_pdf(md_path, out_path):
     md_path = Path(md_path)
     cfg, body = parse_front_matter(md_path.read_text(encoding="utf-8-sig"))  # con o sin BOM
     cfg["_base"] = str(md_path.parent)
+    check_config(cfg)
     size = LETTER if cfg["tamano"].lower() in ("carta", "letter") else A4
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)     # crea la carpeta de salida
 
     doc = ManualDoc(
         str(out_path), cfg, pagesize=size,
@@ -753,38 +1006,63 @@ def build_pdf(md_path, out_path):
         topMargin=2.4 * cm, bottomMargin=2.4 * cm,
         title=cfg["titulo"], author=cfg["autor"], subject=cfg["subtitulo"],
         keywords=cfg["palabras_clave"], creator="Plantilla de manual (manual.py)",
-        lang="es", pageCompression=1,
+        lang=idioma(cfg), pageCompression=1,
     )
     styles = build_styles(doc.primary)
     # El marco tiene 6 pt de relleno por lado
     builder = Builder(cfg, styles, md_path.parent, doc.width - 12, doc.height - 12)
     builder.first_line = cfg.get("_body_line", 0)
+    SplitTable.FULL = doc.height - 12
 
+    content = builder.build(body)
     story = [Spacer(1, 1), NextPageTemplate("contenido"), PageBreak()]
-    if cfg["indice"].lower() in ("si", "sí", "yes", "true", "1"):
+    # Sin títulos no hay índice: ReportLab imprimiría un texto de relleno en su lugar.
+    if cfg["indice"].lower() in ("si", "sí", "yes", "true", "1") and builder.bm:
         toc = TableOfContents(levelStyles=styles["toc"], dotsMinLevel=0)
-        story += [Paragraph("Índice", styles["toc_title"]), _Rule(doc.primary),
+        story += [Paragraph(doc.t["indice"], styles["toc_title"]), _Rule(doc.primary),
                   toc, PageBreak()]
-    story += builder.build(body)
+    story += content
 
     doc.multiBuild(story, canvasmaker=make_canvas(doc))
+    build_pdf.warnings = list(builder.warnings)
     for w in builder.warnings:
         print(f"Aviso {w}", file=sys.stderr)
     return out_path
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Genera un manual PDF desde Markdown.")
+    ap = argparse.ArgumentParser(
+        description="Genera un manual PDF desde Markdown.",
+        epilog="Código de salida: 0 generado; 1 generado con avisos (solo con --estricto); "
+               "2 no se pudo generar.")
     ap.add_argument("entrada", help="archivo .md con el contenido")
     ap.add_argument("-o", "--salida", help="archivo PDF de salida")
+    ap.add_argument("--estricto", action="store_true",
+                    help="terminar con código 1 si hubo avisos (el PDF se genera igual)")
     args = ap.parse_args()
     src = Path(args.entrada)
-    if not src.exists():
-        sys.exit(f"No existe el archivo: {src}")
+    if not src.is_file():
+        print(f"No existe el archivo: {src}", file=sys.stderr)
+        return 2
     out = Path(args.salida) if args.salida else src.with_suffix(".pdf")
-    build_pdf(src, out)
+    try:
+        build_pdf(src, out)
+    except ConfigError as e:
+        print(f"No se generó: {e}", file=sys.stderr)
+        return 2
+    except LayoutError as e:
+        # Un elemento que no se puede dividir y no cabe en una página
+        what = re.sub(r"\s+", " ", str(e))[:160]
+        print(f"No se generó: hay un elemento más alto que una página y no se pudo dividir "
+              f"({what}). Revisar con tools/validar.py.", file=sys.stderr)
+        return 2
     print(f"Manual generado: {out}  ({out.stat().st_size / 1024:.0f} KB)")
+    n = len(build_pdf.warnings)
+    if n:
+        print(f"{n} avisos: lo indicado se imprimió tal cual o no se imprimió; corregir el .md.",
+              file=sys.stderr)
+    return 1 if n and args.estricto else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

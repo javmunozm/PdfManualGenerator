@@ -7,7 +7,8 @@ Uso:
 
 `partir` crea documentos/<n>/partes/00.md, 01.md... (00 trae la cabecera). Sirve para
 trabajar un documento largo por partes: cada parte se lee y se reescribe completa, sin
-cargar el resto. Un capítulo más grande que la tanda se divide en sus secciones "##".
+cargar el resto. Un capítulo más grande que la tanda se divide en sus secciones "##";
+los capítulos chicos seguidos van juntos en una parte, hasta llenar la tanda.
 
 `unir` reconstruye el .md con las partes en orden. El anterior queda como
 <n>.anterior.md (es el original para tools/comparar_traduccion.py).
@@ -56,7 +57,15 @@ def split(lines, limit):
                     parts.append(group)
                 group = (x, y)
         parts.append(group)
-    return parts
+    # Las partes chicas se juntan con la siguiente hasta llenar la tanda (P1): cada parte
+    # es un subagente, y su arranque cuesta lo mismo tenga la parte 40 tokens o 7.000.
+    merged = []
+    for a, b in parts:
+        if merged and size(merged[-1][0], b) <= limit:
+            merged[-1] = (merged[-1][0], b)
+        else:
+            merged.append((a, b))
+    return merged
 
 
 def main():

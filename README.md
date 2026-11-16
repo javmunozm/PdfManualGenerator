@@ -32,11 +32,15 @@ python tools/preparar.py extracted/archivo           # -> documentos/archivo/ + 
 python tools/validar.py documentos/x/x.md            # revisa el .md antes de generar
 python manual.py documentos/x/x.md -o output/x.pdf   # genera el PDF
 python tools/comparar.py sources/archivo.pdf output/x.pdf   # código 0 = correcto
+python tools/revisar.py output/x.pdf                 # hojas de revisión visual
+python tools/estado.py                               # en qué está cada documento
 python -m unittest discover tests                    # pruebas del flujo
 ```
 
 Para un manual nuevo, copia `ejemplo.md` y reemplaza el contenido. `ejemplo.pdf`
-explica toda la sintaxis.
+explica toda la sintaxis. Si no hay un documento de origen en `sources/`, el contenido
+se investiga en la web para el lector que se indique (skill `/nuevo-manual`). Un manual
+en inglés lleva `idioma: en` en la cabecera.
 
 ## Archivos
 
@@ -49,11 +53,14 @@ explica toda la sintaxis.
 | `tools/costo.py` | Estima los tokens de trabajar un documento y propone un plan por tandas. |
 | `tools/capitulos.py` | Parte un `.md` por capítulos y lo vuelve a unir (para traducir o trabajar por partes). |
 | `tools/comparar_traduccion.py` | Verifica una traducción por su estructura: código, cifras, tablas, enlaces, títulos. |
-| `tools/comparar.py` | Verifica el PDF generado contra su origen: faltantes, cifras, portada, sobrantes y orden. |
+| `tools/comparar.py` | Verifica el PDF generado contra su origen: faltantes, cifras, portada, sobrantes y orden; además el pie, el índice, el idioma de la plantilla y los títulos. |
+| `tools/revisar.py` | Arma las hojas de revisión visual (portada, índice y páginas con tablas, figuras o código). |
+| `tools/estado.py` | Dice en pocas líneas qué le falta a cada documento. |
+| `fonts/` | DejaVu Sans y DejaVu Sans Mono (licencia incluida): símbolos que la fuente normal no tiene. |
 | `tests/` | Pruebas automáticas. Crean sus propios archivos; no usan `sources/`. |
 | `.claude/skills/` | Skills: `/extraer`, `/costo`, `/regenerar-manual`, `/traducir-manual`, `/nuevo-manual`, `/actualizar-manual`, `/verificar-pdf`. |
 | `.claude/agents/` | Subagentes: `describir-figuras`, `traductor`, `revisor-visual`. |
-| `.claude/hooks/`, `.claude/settings.json` | Hook y permisos de Claude Code (protegen `sources/`). |
+| `.claude/hooks/`, `.claude/settings.json` | Hooks y permisos de Claude Code: protegen `sources/`, validan un `.md` al editarlo y avisan de un PDF desactualizado. |
 | `ejemplo.md` / `ejemplo.pdf` | Ejemplo y guía de sintaxis. `imagenes/` tiene su figura. |
 | `sources/` | Originales (no se modifican). Local. |
 | `extracted/` | Resultados de extracción. Local. |

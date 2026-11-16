@@ -45,7 +45,7 @@ escriben a archivos y muestran pocas líneas en la terminal.
 | **Resuelto**, sin prueba automática | K1 (`CLAUDE.md`), D4 (git, `.gitignore`), D2 (`README.md`) |
 | **Parcial** | G9: un título con `<` ya no rompe el índice; un enlace en un título sigue saliendo tal cual. G8: `validar.py` detecta esos casos antes de generar y `manual.py` avisa si no pudo interpretar una línea; falta `--estricto` en el generador. G13: `preparar.py` agrega el capítulo que falta; el generador todavía numera 0.1 si no se preparó. C5: mensaje claro para otros formatos; sigue sin compararlos ni comparar estructura. D3: `requirements.txt` y revisión visual sin `pypdfium2`; falta `tools/revisar.py`. K3: contexto de este proyecto en `.claude/settings.local.json`; la configuración global no se tocó. E8: `comparar.py` ya une las palabras cortadas; el reporte del extractor todavía no. |
 | **Resuelto** (sección 9) | Skills (9.2, más `costo` y `traducir-manual`), subagentes (9.4, más `traductor`) y T1 (`tools/comparar_traduccion.py`). Además `tools/costo.py` y `tools/capitulos.py`. Las herramientas tienen prueba; las skills y los subagentes solo se comprobaron en su formato, no en una tarea real. Ver `docs/pipeline.md`. |
-| **Pendiente** | Fases 4 y 6, y de la 5: hooks H3, H4 y H5, `tools/estado.py` y `tools/revisar.py`. |
+| **Pendiente** | Fases 4 y 6, y de la 5: hooks H3, H4 y H5, `tools/estado.py` y `tools/revisar.py`. **Todo esto quedó resuelto el 15/11/2026: ver la sección 13, que reemplaza a esta tabla.** |
 
 Notas sobre lo resuelto:
 
@@ -348,3 +348,78 @@ traducido al inglés, 157 páginas generadas, `comparar.py --estricto` en códig
   cuesta el doble que Opus 5.5 y cuatro veces lo que Sonnet 5.5 por token.
 - Recomendación: modelo intermedio por defecto; subir solo cuando `comparar.py` falle
   por una causa que no esté en este documento o cuando se cambien las herramientas.
+
+## 13. Fases 4, 5 y 6 y errores nuevos (15/11/2026)
+
+Revisión completa del sistema y cierre de lo pendiente. Esta sección reemplaza a la tabla
+1.1. Estado al 16/11/2026: 99 pruebas (`python -m unittest discover tests`), todas con
+archivos propios, y `ejemplo.pdf` regenerado con `comparar.py --estricto` en código 0.
+Los puntos resueltos con prueba llevan su código en el nombre (`test_G5_…`, `test_E11_…`,
+`test_N2_…`) o en un comentario de la prueba (E13). G12, N8 y los cambios de
+documentación (N5, N6) no tienen una prueba con su código.
+
+### 13.1 Errores nuevos
+
+| ID | Sev. | Error | Estado |
+|---|---|---|---|
+| N1 | Alto | El pie mostraba un capítulo equivocado en 42 de 156 páginas del manual de Node ya generado. Era G5: `page_chapters` no se vaciaba entre las pasadas de `multiBuild`. | **Resuelto.** Se vacía al comenzar cada pasada. Manual regenerado y verificado. |
+| N2 | Alto | Un manual en inglés salía con «Índice», «Página X de Y», rótulos de portada, títulos por defecto de cuadros e idioma del PDF en español. | **Resuelto.** Campo `idioma: es\|en` en la cabecera; una sola tabla de textos (`manual.TEXTOS`) que usan el generador, `comparar.py` y `validar.py`. `comparar_traduccion.py` exige `idioma: en` en la traducción. |
+| N3 | Alto | `comparar.py` descartaba encabezado, pie e índice: dio código 0 con N1 y N2. | **Resuelto.** En todo PDF de `manual.py` revisa el capítulo y la numeración del pie, el índice contra los marcadores y el idioma (`check_template`). Con el PDF anterior del manual de Node informa las mismas 42 páginas. |
+| N4 | Alto | En un manual traducido nada comparaba el resultado con el original: el paso `extracted/` → `documentos/` en español no lo verificaba ninguna herramienta. | **Resuelto en el flujo.** `/regenerar-manual` genera y compara el PDF en español contra el original antes de traducir. No se ejecutó con un original real: requiere permiso para ese archivo de `sources/`. |
+| N5 | Medio | Las guías se contradecían sobre el origen de la verificación. | **Resuelto.** Regla 9 de `CLAUDE.md` y una sola regla en `pipeline.md`, `generator.md` y la skill `verificar-pdf`: el original de `sources/` si es PDF. |
+| N6 | Bajo | Cantidad de pruebas desfasada en la documentación. | **Resuelto.** `pipeline.md` dice 99. El «41 pruebas» de la tabla 1.1 es el dato de su fecha. |
+| N7 | Bajo | `guardia.py` dejaba pasar la llamada si no podía leerla o fallaba. | **Resuelto.** Pide confirmación. Límite: si Python no está, el hook no corre; quedan las reglas `ask` y `deny` de `settings.json`. |
+| N8 | Bajo | Un documento sin títulos imprimía un índice con el texto de relleno de ReportLab. | **Resuelto.** Sin títulos no hay índice. |
+
+### 13.2 Generador
+
+| ID | Estado |
+|---|---|
+| G2 | **Resuelto.** Cuadros y citas van una fila por párrafo; una fila más alta que una página se parte por dentro (`SplitTable`), solo en ese caso. Límite: en un cuadro con título cuyo primer párrafo pasa de ~1.200 caracteres, el título puede quedar solo al final de una página (la regla que lo impide hace que ReportLab no termine si ambos no caben en una página). |
+| G3 | **Resuelto.** La lista empieza en el número escrito y admite líneas vacías entre ítems. |
+| G4 | **Resuelto.** Fuente de respaldo DejaVu Sans y DejaVu Sans Mono en `fonts/` para lo que Helvetica y Courier no tienen; queda como texto buscable. En código, cada tramo se dibuja en su columna para no desalinear diagramas. Lo que tampoco está en DejaVu (chino, japonés, emoji) sigue como ■, con error en `validar.py` y aviso en `manual.py`. Un símbolo dentro de un título en negrita sale en peso normal. |
+| G5 | **Resuelto** (N1). |
+| G8 | **Resuelto.** Avisos con línea para imagen inexistente, bloque o comentario sin cerrar, texto tras `-->`, `---`, título de nivel 4 y caracteres sin glifo; `--estricto` termina en 1. |
+| G9 | **Resuelto.** Un enlace en un título queda como texto en el marcador y el índice. |
+| G10 | **Resuelto.** Crea la carpeta de salida; `color` o `dpi_imagenes` inválidos dan un mensaje y código 2. |
+| G11 | **Resuelto.** Título, curso, capítulo y datos de portada se recortan con «…». Pendiente menor: un título muy largo en la portada se acomoda en varios renglones y puede subir más allá de la banda. |
+| G12 | **Resuelto.** Un título seguido de una figura pasa junto con ella a la página siguiente. |
+| G13 | **Resuelto.** `fecha:` vacía usa la de hoy; una sección sin capítulo sale sin número. |
+| G17 | **Resuelto.** Listas anidadas por sangría (2 espacios o más). |
+
+### 13.3 Extractor
+
+| ID | Estado |
+|---|---|
+| E4 | **Resuelto para texto corrido y tablas de líneas horizontales.** Superíndices y subíndices pasan a sus caracteres propios (`10³`, `H₂O`); la cobertura los cuenta bien. Lo que no tiene carácter propio queda en línea y se lista en el reporte. Pendiente: las tablas con bordes completos (las arma PyMuPDF) siguen aplanándolos. |
+| E5 | **Resuelto.** Hipervínculos de Word con su dirección, listas numeradas con su número y nivel, celdas combinadas una sola vez. |
+| E6 | **Resuelto.** Texto y CSV en UTF-8, UTF-16 o cp1252; CSV de una columna; salto dentro de un campo. |
+| E8 | **Resuelto.** Un corte con guion se une solo si la palabra unida existe en otra parte del documento; si no, conserva el guion y lo lista. La cobertura usa la misma regla. |
+| E10 | **Resuelto.** JPEG tal cual, transparencia conservada, una referencia por cada aparición (salvo una imagen repetida en el 30% de las páginas o más: una sola vez). |
+| E11 | **Resuelto.** El enlace va en la aparición que corresponde a su posición, sin la puntuación final y aunque el texto tenga formato. Lo que cae dentro de código en línea sigue yendo a la línea «Enlaces:». |
+| E12 | **Resuelto.** Hojas y diapositivas ocultas marcadas `(oculta)`; porcentajes con signo y fechas sin hora; límite de 2.000 filas por hoja o CSV, declarado en el reporte (`--filas 0` = todas). |
+| E13 | **Resuelto.** Solo figuran como pendientes las figuras sin pie; lo informativo va aparte; código de salida 0, 1 (con pendientes) o 2. |
+| E14 | **Resuelto.** Un título de metadatos sin valor se reemplaza por el texto más grande de la portada (o el nombre del archivo). |
+| E15 | **Resuelto.** Tokens con caracteres / 3,5; archivo protegido o dañado: mensaje de una línea y código 2. No se cambió la detección del índice sin puntos guía. |
+| E18 | **Resuelto.** NUL y U+FFFD quedan como `[SIMBOLO?]`, con su página en el reporte; `validar.py` y `preparar.py` lo tratan como pendiente. |
+
+### 13.4 Verificador, flujo y automatización
+
+| ID | Estado |
+|---|---|
+| C5 | **Resuelto en lo que importa.** Con un `.md` de origen compara títulos contra marcadores (falla) y cantidad de figuras y enlaces (aviso; falla con `--estricto`). Sigue sin aceptar Word, PowerPoint o Excel como origen: para esos se usa el `.md` de `extracted/`. No cuenta tablas. |
+| D3 | **Resuelto.** `tools/revisar.py` reemplaza el comando de una línea. |
+| P1 | **Resuelto.** `capitulos.py` junta los capítulos chicos seguidos hasta llenar la tanda. |
+| H3, H4, H5 | **Resuelto.** `.claude/hooks/flujo.py` y `tools/estado.py`. H3 se comprobó en una sesión real (devolvió el error con su línea al editar). H5 también, el 16/11/2026: la sesión empezó con el resumen de `estado.py` en el contexto. H4 se probó entregándole la llamada, porque se dispara al cerrar un turno. |
+| K3 | Sin cambios: la configuración global no se tocó. |
+
+### 13.5 Lo que no se verificó
+
+- Nada se probó con archivos de `sources/`. El extractor corregido no se volvió a ejecutar
+  sobre el manual de Node: su extracción es anterior a estos cambios y sigue vigente.
+- La comparación del PDF en español contra el original (N4) no se ejecutó con ese manual.
+- La skill `verificar-pdf` preaprueba `tools/revisar.py output/*` desde el 16/11/2026
+  (autorizado por el usuario); no se comprobó en una sesión real que deje de pedir confirmación.
+- La revisión visual del manual regenerado (dos hojas, 7 páginas) no dio observaciones;
+  es una muestra a baja escala, no una revisión de las 157 páginas.
+- H4 (impedir el cierre con un PDF desactualizado) no se vio actuar en una sesión real.
