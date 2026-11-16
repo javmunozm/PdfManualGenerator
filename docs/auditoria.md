@@ -392,7 +392,7 @@ documentación (N5, N6) no tienen una prueba con su código.
 | ID | Estado |
 |---|---|
 | E4 | **Resuelto**, también en tablas con bordes completos (16/11/2026). Superíndices y subíndices pasan a sus caracteres propios (`10³`, `H₂O`); la cobertura los cuenta bien. Lo que no tiene carácter propio queda en línea y se lista en el reporte. Al probar las tablas con bordes apareció un error mayor (**E19**, abajo). |
-| E19 | **Nuevo, Alto. Resuelto (16/11/2026).** Una tabla con bordes completos y letra de 10 pt o menos se perdía como tabla: quedaba como un párrafo con todas las celdas seguidas, y el reporte decía «Cobertura 100%; sin observaciones». Causa: `Table.extract()` de PyMuPDF une las palabras cuando el espacio mide menos de 3 pt («sin cambios» → «sincambios»), `clean_table` veía palabras distintas a las de la zona y descartaba la tabla. Además se descartaba si el renglón de arriba rozaba el borde. Ahora el texto de cada celda se lee de sus tramos (`table_rows`, con `cell_md`, igual que en las tablas de líneas horizontales): conserva negrita, cursiva y código, y un renglón que solo roza el borde no cuenta. Cambio visible: un salto de renglón dentro de una celda sale como espacio, no como `<br>`. Prueba `test_E4_tabla_con_bordes_*`. No se comprobó con un PDF real: las extracciones ya hechas son anteriores y no se rehicieron. |
+| E19 | **Nuevo, Alto. Resuelto (16/11/2026).** Una tabla con bordes completos y letra de 10 pt o menos se perdía como tabla: quedaba como un párrafo con todas las celdas seguidas, y el reporte decía «Cobertura 100%; sin observaciones». Causa: `Table.extract()` de PyMuPDF une las palabras cuando el espacio mide menos de 3 pt («sin cambios» → «sincambios»), `clean_table` veía palabras distintas a las de la zona y descartaba la tabla. Además se descartaba si el renglón de arriba rozaba el borde. Ahora el texto de cada celda se lee de sus tramos (`table_rows`, con `cell_md`, igual que en las tablas de líneas horizontales): conserva negrita, cursiva y código, y un renglón que solo roza el borde no cuenta. Cambio visible: un salto de renglón dentro de una celda sale como espacio, no como `<br>`. Prueba `test_E4_tabla_con_bordes_*`. Comprobado con el manual de Node (con permiso del usuario, a una carpeta temporal): el extractor de antes y el de después de esta corrección dan un `.md` idéntico, con 42 tablas y 289 filas, las mismas que la extracción del 12/11/2026. Ese manual no perdió tablas por E19. |
 | E5 | **Resuelto.** Hipervínculos de Word con su dirección, listas numeradas con su número y nivel, celdas combinadas una sola vez. |
 | E6 | **Resuelto.** Texto y CSV en UTF-8, UTF-16 o cp1252; CSV de una columna; salto dentro de un campo. |
 | E8 | **Resuelto.** Un corte con guion se une solo si la palabra unida existe en otra parte del documento; si no, conserva el guion y lo lista. La cobertura usa la misma regla. |
@@ -416,8 +416,10 @@ documentación (N5, N6) no tienen una prueba con su código.
 
 ### 13.5 Lo que no se verificó
 
-- Nada se probó con archivos de `sources/`. El extractor corregido no se volvió a ejecutar
-  sobre el manual de Node: su extracción es anterior a estos cambios y sigue vigente.
+- Con archivos de `sources/` solo se hizo una comprobación (16/11/2026, con permiso): el
+  manual de Node se extrajo a una carpeta temporal para contar tablas (E19). De esa
+  extracción no se revisó nada más, y la de `extracted/`, anterior a estos cambios, sigue
+  vigente.
 - La comparación del PDF en español contra el original (N4) no se ejecutó con ese manual.
 - La skill `verificar-pdf` preaprueba `tools/revisar.py output/*` desde el 16/11/2026
   (autorizado por el usuario); no se comprobó en una sesión real que deje de pedir confirmación.
