@@ -28,6 +28,17 @@ El contenido sale de `sources/` (regla 9): un manual regenerado se compara con s
 
 - `<archivo>` está en `extracted/$ARGUMENTS/fuente.json`. Es el archivo que el usuario
   autorizó con `/extraer`; el hook pedirá confirmación. Lo lee el script, no la conversación.
+  Si no está en la raíz de `sources/`, buscarlo solo por ese nombre (puede estar en una
+  subcarpeta); no listar la carpeta.
+- Contra el original, leer la falla antes de tocar el `.md`:
+  - La misma frase en casi todas las páginas: es un encabezado o pie del original que
+    `comparar.py` no reconoció. No es una pérdida; es un defecto de la herramienta
+    (`docs/auditoria.md`, C9): avisar al usuario.
+  - Un rótulo que el original pone sobre cada título y que al reestructurar pasó a la
+    numeración («PARTE II · CAPÍTULO 5»): se declara con `--ignorar "PARTE II · CAPÍTULO"`,
+    una vez por variante.
+  - `Aviso: sobran` y pares en otro orden por títulos reordenados o diagramas: no son falla
+    aquí (esta comparación no lleva `--estricto`).
 - Un manual traducido ya se comparó con su original en español, antes de traducir
   (skill `regenerar-manual`); aquí se compara con su `.md` en inglés.
 - `Faltan`, `Cifras`, `Portada`, `Estructura`: corregir el `.md`, regenerar, repetir.

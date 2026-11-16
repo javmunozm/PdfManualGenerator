@@ -142,6 +142,8 @@ frecuente o con aviso. **Bajo** = detalle.
 | C6 | Alto | `--estricto` contaba como texto sobrante (y como cambio de orden) el encabezado que `manual.py` repite cuando una tabla sigue en otra página: ningún documento con una tabla de más de una página podía terminar en código 0. | Manual_4_Node_React19_MongoDB: unas 60 palabras «sobrantes» que eran encabezados repetidos. | **Resuelto.** Con origen `.md`, se descartan del PDF las apariciones de un encabezado de tabla al inicio de una página que el origen no tiene (`drop_repeated_headers`). Pruebas `test_C6_*`: una fila duplicada de verdad sigue siendo falla. |
 | C7 | Medio | Los símbolos que `manual.py` dibuja con ZapfDingbats (`▼`, `▲`) se leen del PDF como letras («M», «L») y aparecían como palabras sobrantes y pares en otro orden. | Manual_4_Node_React19_MongoDB: `m x7 l` en los diagramas dentro de bloques de código. | **Resuelto.** `pdf_lines` no toma el texto de los tramos en fuente Dingbats. Prueba `test_C7_*`. |
 | C8 | Medio | Una palabra partida sin guion porque no cabe en su celda (queda en dos o más renglones) se contaba como faltante y sus trozos como sobrantes. E8 solo cubría el corte con guion. | Probado con identificadores de 70 caracteres en una tabla de dos columnas. | **Resuelto.** En el PDF generado los trozos se unen si la palabra completa existe en el origen y algún trozo no (`to_tokens(..., soft=True)`). Prueba `test_C8_*`. |
+| C9 | Alto | Con un PDF original como origen, un encabezado formado por dos textos a la misma altura (título a la izquierda, proyecto a la derecha) se contaba como texto faltante en cada página: `pdf_lines` unía los dos textos en un renglón antes de preguntar si era un encabezado repetido, y unido ya no coincidía con lo que `find_boilerplate` había anotado. | Manual_4_Node_React19_MongoDB (16/11/2026, primera ejecución de N4): 1.351 palabras «faltantes» de 37.425; todas eran el encabezado. | **Resuelto.** Se decide con el renglón suelto, igual que el extractor, y un renglón repetido no se une con uno que no lo es. Prueba `test_C9_*`. |
+| C10 | Alto | Entre dos PDF, el encabezado de una tabla que sigue en otra página se contaba como falta (el original lo repite donde corta la tabla y el generado la corta en otro lugar) o como sobrante. Además, una cifra del original que queda en la portada generada («Manual 4 de 4») se informaba como «cifra fuera de lugar», que es falla. | Mismo manual: 8 palabras de un encabezado de tabla repetido en la p.66 y 2 cifras de la portada. | **Resuelto.** `repeated_at_page_start` reconoce los renglones con que empieza una página y que repiten, enteros y seguidos, renglones de la anterior; `drop_repeated_headers` quita de cada PDF solo las repeticiones que el otro no tiene. Las vecinas de una cifra también se buscan en la portada generada. Pruebas `test_C10_*` (una fila duplicada de verdad sigue siendo falla). Límite: un renglón perdido que estaba al inicio de una página y era idéntico a otro de la página anterior no se informaría. |
 
 ---
 
@@ -352,7 +354,7 @@ traducido al inglés, 157 páginas generadas, `comparar.py --estricto` en códig
 ## 13. Fases 4, 5 y 6 y errores nuevos (15/11/2026)
 
 Revisión completa del sistema y cierre de lo pendiente. Esta sección reemplaza a la tabla
-1.1. Estado al 16/11/2026: 102 pruebas (`python -m unittest discover tests`), todas con
+1.1. Estado al 16/11/2026: 105 pruebas (`python -m unittest discover tests`), todas con
 archivos propios, y `ejemplo.pdf` regenerado con `comparar.py --estricto` en código 0.
 Los puntos resueltos con prueba llevan su código en el nombre (`test_G5_…`, `test_E11_…`,
 `test_N2_…`) o en un comentario de la prueba (E13). G12, N8 y los cambios de
@@ -365,7 +367,7 @@ documentación (N5, N6) no tienen una prueba con su código.
 | N1 | Alto | El pie mostraba un capítulo equivocado en 42 de 156 páginas del manual de Node ya generado. Era G5: `page_chapters` no se vaciaba entre las pasadas de `multiBuild`. | **Resuelto.** Se vacía al comenzar cada pasada. Manual regenerado y verificado. |
 | N2 | Alto | Un manual en inglés salía con «Índice», «Página X de Y», rótulos de portada, títulos por defecto de cuadros e idioma del PDF en español. | **Resuelto.** Campo `idioma: es\|en` en la cabecera; una sola tabla de textos (`manual.TEXTOS`) que usan el generador, `comparar.py` y `validar.py`. `comparar_traduccion.py` exige `idioma: en` en la traducción. |
 | N3 | Alto | `comparar.py` descartaba encabezado, pie e índice: dio código 0 con N1 y N2. | **Resuelto.** En todo PDF de `manual.py` revisa el capítulo y la numeración del pie, el índice contra los marcadores y el idioma (`check_template`). Con el PDF anterior del manual de Node informa las mismas 42 páginas. |
-| N4 | Alto | En un manual traducido nada comparaba el resultado con el original: el paso `extracted/` → `documentos/` en español no lo verificaba ninguna herramienta. | **Resuelto en el flujo.** `/regenerar-manual` genera y compara el PDF en español contra el original antes de traducir. No se ejecutó con un original real: requiere permiso para ese archivo de `sources/`. |
+| N4 | Alto | En un manual traducido nada comparaba el resultado con el original: el paso `extracted/` → `documentos/` en español no lo verificaba ninguna herramienta. | **Resuelto y ejecutado con un original real (16/11/2026).** `/regenerar-manual` genera y compara el PDF en español contra el original antes de traducir. Con el manual de Node (versión en español previa a la traducción, en una carpeta temporal): la primera ejecución falló por tres defectos de `comparar.py` (C9 y C10, sección 5), ninguno una pérdida real. Corregidos, termina en código 0: 36.055 palabras, 0 faltantes, declarando con `--ignorar` el rótulo «PARTE x · CAPÍTULO» que el original pone sobre cada capítulo y que al reestructurar pasó a la numeración. Quedan como aviso 34 palabras sobrantes y 24 pares en otro orden (títulos de parte y diagramas), que en esta comparación no son falla. |
 | N5 | Medio | Las guías se contradecían sobre el origen de la verificación. | **Resuelto.** Regla 9 de `CLAUDE.md` y una sola regla en `pipeline.md`, `generator.md` y la skill `verificar-pdf`: el original de `sources/` si es PDF. |
 | N6 | Bajo | Cantidad de pruebas desfasada en la documentación. | **Resuelto.** `pipeline.md` dice 99. El «41 pruebas» de la tabla 1.1 es el dato de su fecha. |
 | N7 | Bajo | `guardia.py` dejaba pasar la llamada si no podía leerla o fallaba. | **Resuelto.** Pide confirmación. Límite: si Python no está, el hook no corre; quedan las reglas `ask` y `deny` de `settings.json`. |
@@ -416,11 +418,13 @@ documentación (N5, N6) no tienen una prueba con su código.
 
 ### 13.5 Lo que no se verificó
 
-- Con archivos de `sources/` solo se hizo una comprobación (16/11/2026, con permiso): el
-  manual de Node se extrajo a una carpeta temporal para contar tablas (E19). De esa
-  extracción no se revisó nada más, y la de `extracted/`, anterior a estos cambios, sigue
-  vigente.
-- La comparación del PDF en español contra el original (N4) no se ejecutó con ese manual.
+- Con archivos de `sources/` se hicieron dos comprobaciones (16/11/2026, con permiso), las
+  dos con el manual de Node y en una carpeta temporal: contar tablas con el extractor
+  corregido (E19) y comparar el PDF en español contra el original (N4, código 0). La
+  extracción de `extracted/`, anterior a estos cambios, sigue vigente y no se rehízo.
+- N4 solo se probó con ese original. Otro PDF puede traer un encabezado o un pie que
+  `comparar.py` todavía no reconozca; la señal es la misma: la misma frase «faltante» en
+  casi todas las páginas.
 - La skill `verificar-pdf` preaprueba `tools/revisar.py output/*` desde el 16/11/2026
   (autorizado por el usuario); no se comprobó en una sesión real que deje de pedir confirmación.
 - La revisión visual del manual regenerado (dos hojas, 7 páginas) no dio observaciones;

@@ -154,10 +154,16 @@ def pdf_lines(doc, skip_pages=()):
                 if not text:
                     continue
                 size = max(s["size"] for s in ln["spans"])
-                if last is not None and abs(rows[last][1][1] - ln["bbox"][1]) < 2:
-                    rows[last] = (rows[last][0] + " " + text, rows[last][1], max(size, rows[last][2]))
+                # Encabezado o pie repetido del original: se decide con el renglón suelto,
+                # como el extractor. Dos textos a la misma altura (título a la izquierda,
+                # proyecto a la derecha) se repiten cada uno; unidos no se reconocían (C9).
+                boiler = not generated and extraer.is_boiler(text, ln["bbox"], H, bp)
+                if last is not None and abs(rows[last][1][1] - ln["bbox"][1]) < 2 \
+                        and rows[last][3] == boiler:
+                    rows[last] = (rows[last][0] + " " + text, rows[last][1],
+                                  max(size, rows[last][2]), boiler)
                 else:
-                    rows.append((text, ln["bbox"], size))
+                    rows.append((text, ln["bbox"], size, boiler))
                     last = len(rows) - 1
         if n in skip_pages:
             aux += len(rows)
@@ -178,11 +184,10 @@ def pdf_lines(doc, skip_pages=()):
             if generated:
                 chrome["index"] += index_lines(page)
             continue
-        for text, bb, _ in rows:
+        for text, bb, _, boiler in rows:
             # En un PDF de manual.py el encabezado y el pie están siempre en la franja;
             # en otros PDF se aplican las reglas del extractor.
-            if (extraer.zone_of(bb[1], bb[3], H) if generated
-                    else extraer.is_boiler(text, bb, H, bp)):
+            if extraer.zone_of(bb[1], bb[3], H) if generated else boiler:
                 aux += 1
             else:
                 body.append((text, f"p.{n}"))
@@ -354,10 +359,35 @@ def table_headers(text):
     return heads
 
 
+def repeated_at_page_start(lines, max_lines=8):
+    """Encabezados de tabla repetidos de un PDF, cuando no hay un .md que diga cuáles son:
+    los renglones con que empieza una página y que repiten, enteros y seguidos, renglones
+    de la página anterior (la tabla continúa y vuelve a mostrar su encabezado). Devuelve
+    tuplas de tokens para `drop_repeated_headers`, que solo quita lo que al otro
+    documento le falta."""
+    pages = []
+    for text, where in lines:
+        row = tuple(tokens(text))
+        if not pages or pages[-1][0] != where:
+            pages.append((where, []))
+        if row:
+            pages[-1][1].append(row)
+    heads = set()
+    for (_, prev), (_, cur) in zip(pages, pages[1:]):
+        for k in range(min(max_lines, len(cur)), 0, -1):
+            first = cur[:k]
+            if any(prev[j:j + k] == first for j in range(len(prev) - k + 1)):
+                head = tuple(t for row in first for t in row)
+                if len(head) >= 2:
+                    heads.add(head)
+                break
+    return heads
+
+
 def drop_repeated_headers(toks, locs, heads, src_t):
-    """Quita del PDF generado los encabezados de tabla que manual.py repite cuando la tabla
-    sigue en otra página: solo apariciones al inicio de una página, y solo las que el
-    origen no tiene."""
+    """Quita de un PDF los encabezados de tabla repetidos porque la tabla sigue en otra
+    página (lo hace manual.py y también muchos originales): solo apariciones al inicio de
+    una página, y solo las que el otro documento (`src_t`) no tiene."""
     def count(ts, h):
         n = len(h)
         return sum(1 for i in range(len(ts) - n + 1) if ts[i] == h[0] and tuple(ts[i:i + n]) == h)
@@ -395,8 +425,10 @@ def context(toks, i, span=3):
     return "«…" + " ".join(toks[max(0, i - span): i + span + 1]) + "…»"
 
 
-def compare(src_t, src_l, out_t, credit):
-    """Faltantes, cifras fuera de lugar, sobrantes y pares de palabras ausentes."""
+def compare(src_t, src_l, out_t, credit, credit_rows=()):
+    """Faltantes, cifras fuera de lugar, sobrantes y pares de palabras ausentes.
+    `credit` son las palabras de la portada generada y `credit_rows` sus renglones: una
+    cifra del origen que está en la portada («Manual 4 de 4») tiene ahí sus vecinas."""
     have = Counter(out_t)
     budget = have + credit                                # la portada también cuenta
     missing, left = [], Counter(budget)
@@ -411,7 +443,8 @@ def compare(src_t, src_l, out_t, credit):
     def pairs(ts):
         return Counter(zip(ts, ts[1:]))
     out_pairs = pairs(out_t)
-    lp, rp = Counter(out_pairs), Counter(out_pairs)
+    near = sum((pairs(row) for row in credit_rows), Counter(out_pairs))
+    lp, rp = Counter(near), Counter(near)
     numbers = []
     for i, t in enumerate(src_t):
         if not t[0].isdigit() or t in gone:
@@ -491,8 +524,14 @@ def main():
     if kind != ".pdf":
         heads = table_headers(src_path.read_text(encoding="utf-8-sig"))
         out_t, out_l = drop_repeated_headers(out_t, out_l, heads, src_t)
-    cover_t = Counter(t for line in out_cover for t in tokens(line))
-    missing, numbers, extra, order = compare(src_t, src_l, out_t, cover_t)
+    else:
+        # Entre dos PDF las tablas se cortan en páginas distintas y cada uno repite el
+        # encabezado donde le toca: se quita de cada lado lo que el otro no tiene (C10).
+        src_t, src_l = drop_repeated_headers(src_t, src_l, repeated_at_page_start(src_body), out_t)
+        out_t, out_l = drop_repeated_headers(out_t, out_l, repeated_at_page_start(out_body), src_t)
+    cover_rows = [tokens(line) for line in out_cover]
+    cover_t = Counter(t for row in cover_rows for t in row)
+    missing, numbers, extra, order = compare(src_t, src_l, out_t, cover_t, cover_rows)
 
     # Portada: datos de la cabecera del .md, o texto de la portada original
     everything = set(out_t) | set(cover_t)

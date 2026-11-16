@@ -148,6 +148,87 @@ class Comparar(Caso):
         rc, out = run("tools/comparar.py", origen, pdf)
         self.assertEqual(rc, 0, out)
 
+    def test_C9_encabezado_del_original_en_dos_textos_a_la_misma_altura_no_es_falta(self):
+        # Encabezado con un texto a la izquierda y otro a la derecha, en el mismo renglón:
+        # comparar.py los unía antes de ver si se repetían y, unidos, no los reconocía.
+        origen = self.tmp / "origen.pdf"
+        c = canvas.Canvas(str(origen), pagesize=A4)
+        cuerpo = []
+        for n in range(1, 5):
+            c.setFont("Helvetica", 9)
+            c.drawString(70, H - 35, "Guia 4 · Redes y servicios")
+            c.drawRightString(W - 70, H - 35, "Proyecto Faro")
+            c.drawCentredString(W / 2, 30, str(n))
+            c.setFont("Helvetica", 11)
+            for i in range(6):
+                renglon = f"Texto normal de la hoja {n}, renglon {i} con relleno."
+                cuerpo.append(renglon)
+                c.drawString(70, H - 150 - i * 16, renglon)
+            c.showPage()
+        c.save()
+        with pymupdf.open(origen) as doc:                              # el caso que se quiere probar
+            arriba = [ln["bbox"][1] for b in doc[1].get_text("dict")["blocks"][:1] for ln in b["lines"]]
+        self.assertEqual(len(arriba), 2, "los dos textos del encabezado deben quedar en un bloque")
+        _, pdf = self.generar("nuevo", "\n\n".join(cuerpo) + "\n")
+        rc, out = run("tools/comparar.py", origen, pdf)
+        self.assertEqual(rc, 0, out)
+
+    FILAS = [("codigo", "texto", "Identificador unico del registro"),
+             ("nombre", "texto", "Nombre visible de la persona"),
+             ("activo", "logico", "Indica si la cuenta sigue vigente"),
+             ("origen", "texto", "Sistema desde donde llego el dato")]
+
+    def pdf_con_tabla_en_dos_paginas(self, ruta, duplicada=False):
+        """Original (no de manual.py) con una tabla que sigue en la página 2 y repite ahí
+        su encabezado."""
+        c = canvas.Canvas(str(ruta), pagesize=A4)
+        c.setFont("Helvetica", 11)
+        c.drawString(70, H - 100, "La tabla siguiente describe cada campo del registro.")
+        y = H - 130
+        for fila in [("Campo", "Tipo", "Descripcion")] + self.FILAS[:2] + (self.FILAS[1:2] if duplicada else []):
+            for x, celda in zip((70, 170, 270), fila):
+                c.drawString(x, y, celda)
+            y -= 18
+        c.showPage()
+        c.setFont("Helvetica", 11)
+        y = H - 100
+        for fila in [("Campo", "Tipo", "Descripcion")] + self.FILAS[2:]:
+            for x, celda in zip((70, 170, 270), fila):
+                c.drawString(x, y, celda)
+            y -= 18
+        c.drawString(70, y - 20, "Fin de la descripcion de los campos.")
+        c.save()
+
+    def test_C10_encabezado_de_tabla_repetido_en_el_original_no_es_falta(self):
+        tabla = "| Campo | Tipo | Descripcion |\n|---|---|---|\n" + "".join(
+            f"| {a} | {b} | {d} |\n" for a, b, d in self.FILAS)
+        _, pdf = self.generar("nuevo", "La tabla siguiente describe cada campo del registro.\n\n"
+                              + tabla + "\nFin de la descripcion de los campos.\n")
+        origen = self.tmp / "origen.pdf"
+        self.pdf_con_tabla_en_dos_paginas(origen)
+        rc, out = run("tools/comparar.py", origen, pdf)
+        self.assertEqual(rc, 0, out)
+        self.pdf_con_tabla_en_dos_paginas(origen, duplicada=True)     # una fila de más: sí falta
+        rc, out = run("tools/comparar.py", origen, pdf)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("nombre", out)
+
+    def test_C10_una_cifra_del_original_que_quedo_en_la_portada_no_esta_fuera_de_lugar(self):
+        renglones = [f"Renglon {letra} del contenido con texto suficiente para llenar la hoja inicial."
+                     for letra in "abcdefgh"]
+        origen = self.tmp / "origen.pdf"
+        c = canvas.Canvas(str(origen), pagesize=A4)
+        c.setFont("Helvetica", 11)
+        c.drawString(70, H - 80, "Curso Faro")
+        c.drawString(70, H - 100, "Guia 4 de 4")
+        for i, r in enumerate(renglones):
+            c.drawString(70, H - 140 - i * 16, r)
+        c.save()
+        _, pdf = self.generar("nuevo", "\n\n".join(renglones) + "\n", cabecera=(
+            "---\ntitulo: Curso Faro\nsubtitulo: Guia 4 de 4\nindice: no\nnumerar: no\n---\n\n"))
+        rc, out = run("tools/comparar.py", origen, pdf)
+        self.assertEqual(rc, 0, out)
+
     def test_C3_ignorar_acepta_una_falta_declarada(self):
         origen = self.md("origen", "# Uno\n\nTexto.\n\nEncabezado antiguo de la facultad.\n")
         _, pdf = self.generar("nuevo", "# Uno\n\nTexto.\n")
