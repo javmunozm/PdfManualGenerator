@@ -247,6 +247,44 @@ def heading_level(text, size, bold, nlines, body, toc_levels):
     return 0
 
 
+def mark_key(s):
+    """Clave para comparar un título con un marcador: sin mayúsculas ni puntuación y con
+    las cifras como «#» («PARTE I · CAPÍTULO 1» -> «parte i capítulo #»)."""
+    return re.sub(r"[^\w#]+", " ", key(s)).strip()
+
+
+BOLD_LINE = re.compile(r"\*\*[^*]+\*\*(?:\s+\*\*[^*]+\*\*)*")
+
+
+def toc_by_page(toc):
+    """{página: [(clave, nivel)]} de los marcadores del PDF, con el nivel desde 1."""
+    out = {}
+    if toc:
+        top = min(x[0] for x in toc)
+        for lvl, title, page in toc:
+            out.setdefault(page, []).append((mark_key(title), lvl - top + 1))
+    return out
+
+
+def bookmark_head(kept, size, body, marks):
+    """Título que coincide con un marcador del PDF en su misma página (E20): los primeros
+    renglones del bloque terminan con el texto del marcador. Así se reconoce «PARTE I ·
+    CAPÍTULO 1 Introducción» con el marcador «1. Introducción», y el título de dos
+    renglones que quedó en el mismo bloque que su párrafo. Los renglones del título van
+    en negrita (o el bloque entero es de letra más grande) y lo que sobra antes del texto
+    del marcador es corto (un antetítulo). Devuelve (renglones del título, nivel) o None."""
+    for j in range(1, min(4, len(kept)) + 1):
+        bold = all(BOLD_LINE.fullmatch(md.strip()) for _, md, _ in kept[:j])
+        if not bold and not (j == len(kept) and size >= 1.1 * body):
+            break
+        k = mark_key(" ".join(p for p, _, _ in kept[:j]))
+        for m, lvl in marks:
+            if m and (k == m or (k.endswith(" " + m) and len(k) - len(m) <= 30)):
+                marks.remove((m, lvl))
+                return j, lvl
+    return None
+
+
 def glue(out, ln, vocab=None, kept=None):
     """Agrega un renglón al texto anterior. Si el anterior termina en guion y este sigue
     en minúscula, puede ser un corte de renglón (docu-/mentación) o un guion de verdad
@@ -315,7 +353,57 @@ def unfinished(line):
     return s.endswith((",", "&&", "||", "|", "+", "="))
 
 
-def rebuild_code(lines, right, log=None, skipped=None):
+# Finales con los que un autor sigue a propósito en el renglón de abajo (argumentos,
+# operadores, una lambda): una continuación +4 después de ellos es formato, no un corte.
+AUTHOR_BREAK = (",", "(", "{", "[", "=", "=>", "+", "-", "*", "&&", "||", "|", "\\", ":", ";",
+                "?", "->", "<", ">", "&")
+CONTROL = re.compile(r"\s*(}\s*)?(if|else if|while|for|foreach|using|catch|lock|switch|fixed)\b")
+
+
+def wrapped(prev, nxt, counts):
+    """¿El renglón siguiente, que el original corrió 4 letras más adentro, es la
+    continuación de un renglón que no cabía (E22)? Devuelve el separador para unirlos
+    ("" o " ") o None. La sangría +4 sola no alcanza: un autor también la usa para los
+    parámetros, el cuerpo de un `if` o los argumentos de una llamada. Se une solo si:
+    - el corte cayó a media palabra: los dos trozos juntos son una palabra que el
+      documento usa y alguno de los trozos aparece una sola vez (`API.csp` + `roj`);
+    - el anterior es un comentario y el siguiente no repite la marca (`///`, `#`);
+    - el anterior dejó unas comillas abiertas;
+    - el siguiente es solo un cierre (`);`, `};`, `/>`);
+    - el anterior dejó un paréntesis abierto que el siguiente cierra;
+    - el corte cayó entre dos palabras y el anterior no termina como termina un renglón
+      que el autor sigue abajo (`AUTHOR_BREAK`, `do`/`then`, la cabecera de un `if`).
+    Una continuación tras una coma no se une: no se distingue de un argumento por renglón.
+    Comprobado con el manual 2 generado por manual.py, que corta igual: cada renglón unido
+    está tal cual en su `.md` (docs/registro.md)."""
+    a, b = prev.rstrip(), nxt.strip()
+    tail, head = re.search(r"[^\W\d_]+$", a), re.match(r"[^\W\d_]+", b)
+    if tail and head and counts:
+        t, h = tail.group(0).lower(), head.group(0).lower()
+        if counts[t + h] >= 1 and (counts[t] <= 1 or counts[h] <= 1):
+            return ""
+    if CODE_COMMENT.match(a) and not CODE_COMMENT.match(b):
+        return " "
+    s = re.sub(r"(?<=\w)'(?=\w)", "", a)
+    if not CODE_COMMENT.match(a) and (s.count('"') % 2 or s.count("'") % 2):
+        return " "
+    if re.fullmatch(r"[)\]}]+[;,]?", b):
+        return " " if b.startswith("}") else ""   # `{ X = 1 }` lleva espacio; `f(x)` no
+    if CODE_COMMENT.match(b):
+        return None
+    if b == "/>":
+        return " "
+    depth = lambda x: sum(x.count(c) for c in "([{") - sum(x.count(c) for c in ")]}")   # noqa: E731
+    if depth(a) > 0 and depth(b) < 0 and re.search(r"[\w.\"'>\]]$", a) and not a.endswith("=>"):
+        return " "                                # «(Ctrl+C para» + «salir)»
+    if re.search(r"[\w\"'.)]$", a) and not a.endswith(AUTHOR_BREAK) and re.match(r"[\w./<\"'-]", b) \
+            and not re.search(r"(?<![\w-])(do|then|else|in)$", a) \
+            and not (a.endswith(")") and depth(a) == 0 and CONTROL.match(a)):
+        return " "                                # el corte cayó entre dos palabras
+    return None
+
+
+def rebuild_code(lines, right, log=None, skipped=None, counts=None):
     """Reconstruye el código tal como se escribió. Devuelve (texto, renglones reunidos).
     Si se pasan `log` y `skipped` (listas), anota como (final del renglón, renglón
     siguiente) cada reunión y cada caso dudoso que no se unió, para el reporte.
@@ -330,6 +418,9 @@ def rebuild_code(lines, right, log=None, skipped=None):
       medias (`unfinished`). Solo con la primera, la regla unía instrucciones distintas
       (E17): un renglón con sangría propia es un renglón del autor. `right` es el borde
       útil (el del recuadro o el del texto normal); sin ese dato no se reúne nada.
+      Algunos originales corren la continuación 4 letras más adentro en vez de dejarla
+      en el borde (E22): esa se une solo en los casos de `wrapped` (`counts`: cuántas
+      veces aparece cada palabra en el documento).
     """
     per_char = sorted((x1 - x0) / len(t) for t, x0, x1, *_ in lines
                       if len(t) >= 8 and t == t.strip())
@@ -345,7 +436,7 @@ def rebuild_code(lines, right, log=None, skipped=None):
     steps = sorted(b[2] - a[2] for a, b in zip(rows, rows[1:]) if b[2] - a[2] > 1)
     step = steps[len(steps) // 2] if steps else 1.2 * lines[0][5]
     cols = int((right - left) / cw + 0.05) if right else 0   # letras que caben por renglón
-    out, joined, prev = [], 0, None
+    out, joined, prev, indent = [], 0, None, 0
     for text, x0, y0 in rows:
         text = text.rstrip()
         lead = max(0, round((x0 - left) / cw))
@@ -353,17 +444,22 @@ def rebuild_code(lines, right, log=None, skipped=None):
         first = text.strip().split(" ")[0]
         no_cabia = bool(prev and cols and gap_rows <= 0 and prev[0] >= 0.6 * cols
                         and prev[0] + 1 + len(first) > cols)
-        al_borde = lead + len(text) - len(text.lstrip()) == 0
-        if no_cabia and al_borde and unfinished(out[-1]):
+        own = lead + len(text) - len(text.lstrip())        # sangría de este renglón
+        sep = wrapped(out[-1], text, counts) if no_cabia and own == indent + 4 else None
+        if no_cabia and own == 0 and unfinished(out[-1]):
+            sep = " "
+        if sep is not None:
             if log is not None:
                 log.append((out[-1].strip()[-40:], text.strip()[:40]))
-            out[-1] += " " + text.strip()
+            out[-1] += sep + text.strip()
             joined += 1
-        else:
-            if no_cabia and skipped is not None:
-                skipped.append((out[-1].strip()[-40:], text.strip()[:40]))
-            out += [""] * max(0, min(gap_rows, 3))
-            out.append(" " * lead + text)
+            prev = (own + len(text.strip()), y0)    # fin del renglón visible, no del unido
+            continue
+        if no_cabia and skipped is not None:
+            skipped.append((out[-1].strip()[-40:], text.strip()[:40]))
+        out += [""] * max(0, min(gap_rows, 3))
+        out.append(" " * lead + text)
+        indent = own
         prev = (lead + len(text), y0)             # columna donde termina el renglón visible
     return "\n".join(out), joined
 
@@ -382,7 +478,7 @@ def code_right(boxes, lines, fallback):
 # ---------------------------------------------------------------------------
 # Tablas dibujadas solo con líneas horizontales (y franjas de color)
 # ---------------------------------------------------------------------------
-def ruled_tables(page, drawings):
+def ruled_tables(page, drawings, cuts=None):
     """Devuelve ([(rect, markdown)], [rect sin reconstruir])."""
     H = page.rect.height
     lines, fills = [], []
@@ -449,8 +545,16 @@ def ruled_tables(page, drawings):
         for seg in segs:
             if len(seg) < 3:
                 continue
-            rect = pymupdf.Rect(g["x0"], seg[0], g["x1"], seg[-1])
-            md = build_table(page, rect, seg)
+            end = open_last_row(page, seg, g["x0"], g["x1"])
+            md = None
+            if end:                                  # con la fila sin línea de cierre (E23)
+                rect = pymupdf.Rect(g["x0"], seg[0], g["x1"], end)
+                md = build_table(page, rect, seg + [end], cuts)
+                if md in (None, "NO_ES_TABLA"):
+                    md = None                        # no resultó: la tabla, como estaba
+            if md is None:
+                rect = pymupdf.Rect(g["x0"], seg[0], g["x1"], seg[-1])
+                md = build_table(page, rect, seg, cuts)
             if md == "NO_ES_TABLA":
                 continue  # cuadro o franja de una sola columna: se extrae como texto
             if md:
@@ -469,6 +573,40 @@ def col_starts(page, rect):
         else:
             cols.append([a, b])
     return [c[0] for c in cols]
+
+
+def open_last_row(page, seg, x0, x1):
+    """Borde inferior de una fila que quedó debajo de la última línea de la tabla, o None
+    (E23). Antes de un cambio de página el original no dibuja la línea de cierre y la
+    última fila quedaba como un párrafo suelto. Es una fila si su texto está a menos de una
+    fila y media de la última línea, ocupa dos columnas o más, cada renglón empieza donde
+    empieza una columna de la tabla (un pie de página centrado no) y ningún renglón cruza
+    el límite entre columnas (un párrafo sí lo cruza)."""
+    steps = sorted(b - a for a, b in zip(seg, seg[1:]))
+    row_h = steps[len(steps) // 2]
+    floor = page.rect.height * (1 - MARGIN)              # no entra en la zona del pie
+    band = pymupdf.Rect(x0, seg[-1] + 1, x1, min(seg[-1] + 1.5 * row_h, floor))
+    if band.height < 4:
+        return None
+    starts = col_starts(page, pymupdf.Rect(x0, seg[0], x1, seg[-1]))
+    if len(starts) < 2:
+        return None
+    bounds = [s - 4 for s in starts[1:]]
+    used, bottom = set(), None
+    for b in page.get_text("dict", clip=band)["blocks"]:
+        for ln in b.get("lines", []):
+            lb = pymupdf.Rect(ln["bbox"])
+            if not "".join(s["text"] for s in ln["spans"]).strip():
+                continue
+            if lb.y0 < seg[-1] - 1 or lb.y1 > band.y1 + row_h:
+                return None                       # sigue más allá de una fila
+            if any(lb.x0 < x < lb.x1 for x in bounds) or lb.x0 < x0 - 4 or lb.x1 > x1 + 4:
+                return None                       # cruza columnas: es un párrafo
+            if not any(abs(lb.x0 - s) <= 6 for s in starts):
+                return None                       # no empieza en una columna de la tabla
+            used.add(sum(1 for s in starts if s - 4 <= lb.x0))
+            bottom = max(bottom or 0, lb.y1)
+    return bottom + 2 if bottom and len(used) >= 2 else None
 
 
 def join_tall_rows(page, segs, x0, x1):
@@ -505,18 +643,42 @@ def join_tall_rows(page, segs, x0, x1):
     return out
 
 
-def cell_md(page, rect, lost=None):
+def cut_word(prev, nxt, counts):
+    """¿Una celda angosta partió un identificador entre dos renglones (E23:
+    «Authentication.Op» / «enIdConnect»)? Sí, si los dos trozos juntos son una palabra
+    que el documento usa, el trozo más raro no aparece más veces que la palabra entera,
+    y lo partido parece un identificador (punto, guion bajo o mayúscula en medio)."""
+    a, b = re.sub(r"[`*]+$", "", prev), re.sub(r"^[`*]+", "", nxt)
+    tail, head = re.search(r"[^\W\d_]+$", a), re.match(r"[^\W\d_]+", b)
+    if not (tail and head and counts):
+        return False
+    t, h = tail.group(0), head.group(0)
+    whole = counts[(t + h).lower()]
+    token = re.search(r"\S+$", a).group(0) + re.match(r"\S+", b).group(0)
+    return whole >= 1 and min(counts[t.lower()], counts[h.lower()]) <= whole \
+        and bool(re.search(r"[._]|[a-z][A-Z]", token))
+
+
+def cell_md(page, rect, lost=None, cuts=None):
     parts = []
     for b in page.get_text("dict", clip=rect)["blocks"]:
         for ln in b.get("lines", []):
             spans = [s for s in ln["spans"] if rect.contains(pymupdf.Point(
                 (s["bbox"][0] + s["bbox"][2]) / 2, (s["bbox"][1] + s["bbox"][3]) / 2))]
             if spans:
-                parts.append(span_md(fix_scripts(spans, lost)).strip())
+                part = span_md(fix_scripts(spans, lost)).strip()
+                if parts and part and cuts and cut_word(parts[-1], part, cuts["counts"]):
+                    end = re.search(r"[`*]*$", parts[-1]).group(0)
+                    start = re.match(r"[`*]*", part).group(0)
+                    if end == start:                   # misma marca a los dos lados: una sola
+                        cuts["parts"] += [re.search(r"\S+$", parts[-1]).group(0), part.split()[0]]
+                        parts[-1] = parts[-1][:len(parts[-1]) - len(end)] + part[len(start):]
+                        continue
+                parts.append(part)
     return norm(" ".join(parts))
 
 
-def build_table(page, rect, ys):
+def build_table(page, rect, ys, cuts=None):
     """Filas = franjas entre líneas; columnas = huecos verticales sin texto."""
     words_ = [w for w in page.get_text("words", clip=rect)
               if rect.contains(pymupdf.Point((w[0] + w[2]) / 2, (w[1] + w[3]) / 2))]
@@ -539,13 +701,14 @@ def build_table(page, rect, ys):
     xb = [rect.x0] + [(cols[i][1] + cols[i + 1][0]) / 2 for i in range(len(cols) - 1)] + [rect.x1]
     rows = []
     for y0, y1 in zip(ys, ys[1:]):
-        row = [cell_md(page, pymupdf.Rect(c0, y0, c1, y1)) for c0, c1 in zip(xb, xb[1:])]
+        row = [cell_md(page, pymupdf.Rect(c0, y0, c1, y1), cuts=cuts) for c0, c1 in zip(xb, xb[1:])]
         if any(row):
             rows.append(row)
     if len(rows) < 2:
         return "NO_ES_TABLA"
     md = md_table(rows)
-    if set(words(" ".join(w[4] for w in words_))) - set(words(md)):
+    joined = set(words(" ".join(cuts["parts"]))) if cuts else set()   # trozos unidos (E23)
+    if set(words(" ".join(w[4] for w in words_))) - set(words(md)) - joined:
         return None  # alguna palabra no quedó en la tabla
     return md
 
@@ -571,14 +734,27 @@ def page_to_md(doc, page, ctx):
     n = page.number + 1
     W, H = page.rect.width, page.rect.height
     body, assets = ctx["body"], ctx["assets"]
+    marks = list(ctx.get("toc_pages", {}).get(n, []))     # marcadores de esta página (E20)
     items, notes, removed = [], [], []
 
     raw_lines = [norm(l) for l in page.get_text().splitlines() if l.strip()]
 
     # Página de índice: se guarda comprimida en un comentario (se regenera)
     leaders = [l for l in raw_lines if LEADER.search(l)]
-    if len(leaders) >= 5 and len(leaders) >= 0.4 * len(raw_lines):
-        entries = " | ".join(x for x in (norm(LEADER.sub(" ", l)) for l in raw_lines) if x)
+    # Algunos originales dan título, puntos y número en tres renglones (E21): los puntos
+    # son un tercio de los renglones, pero casi todas las «palabras» de la página.
+    tokens_ = [t for l in raw_lines for t in l.split()]
+    dots = sum(1 for t in tokens_ if re.fullmatch(r"\.+", t))
+    if (len(leaders) >= 5 and len(leaders) >= 0.4 * len(raw_lines)) or \
+            (dots >= 50 and dots >= 0.6 * len(tokens_)):
+        parts = []
+        for l in raw_lines:
+            x = norm(re.sub(r"(?<!\S)\.+(?!\S)", " ", LEADER.sub(" ", l)))
+            if x and x.isdigit() and parts:
+                parts[-1] += " " + x                  # el número de página, con su título
+            elif x:
+                parts.append(x)
+        entries = " | ".join(parts)
         notes.append("índice original (omitido del cuerpo)")
         return f"<!-- p.{n} ÍNDICE ORIGINAL: {entries} -->", notes, [], raw_lines
 
@@ -592,7 +768,8 @@ def page_to_md(doc, page, ctx):
     unique = []
 
     # Tablas con solo líneas horizontales (muy comunes en manuales)
-    ruled, failed = ruled_tables(page, drawings)
+    ctx["cuts"] = {"counts": ctx["counts"], "parts": []}
+    ruled, failed = ruled_tables(page, drawings, ctx["cuts"])
     t_rects = [r for r, _ in ruled]
     for r, md in ruled:
         items.append((r.y0, r.x0, md))
@@ -607,13 +784,16 @@ def page_to_md(doc, page, ctx):
     for t in page.find_tables().tables:
         if any(pymupdf.Rect(t.bbox).intersects(r) for r in t_rects):
             continue
-        rows = table_rows(page, t, ctx["scripts_lost"])
+        rows = table_rows(page, t, ctx["scripts_lost"], ctx["cuts"])
         if clean_table(page, t, rows) and \
                 (t.row_count >= 2 or (t.col_count == 1 and t.bbox[3] - t.bbox[1] > 30)):
             tables.append((t, rows))
     t_rects += [pymupdf.Rect(t.bbox) for t, _ in tables]
     for t, rows in tables:
-        if len(rows) == 1 and len(rows[0]) == 1:  # caja de un solo cuadro
+        code = mono_box(page, t) if t.col_count == 1 else None
+        if code:                                  # recuadro de código con borde (E24)
+            items.append((t.bbox[1], t.bbox[0], ("CODE", code)))
+        elif len(rows) == 1 and len(rows[0]) == 1:  # caja de un solo cuadro
             if rows[0][0]:
                 items.append((t.bbox[1], t.bbox[0], "> " + rows[0][0]))
         else:
@@ -703,8 +883,18 @@ def page_to_md(doc, page, ctx):
             items.append((y0, x0, ("CODE", [(p, bb[0], bb[2], bb[1], bb[3], size)
                                             for p, _, bb in kept if p.strip()])))
             continue
+        head = bookmark_head(kept, size, body, marks) if marks else None
+        if head:                                 # título con su marcador en esta página
+            j, lvl = head
+            title = norm(" ".join(p for p, _, _ in kept[:j]))
+            items.append((y0, x0, "#" * min(lvl, 3) + " " + title))
+            ctx["headings"].append(title)
+            kept = kept[j:]
+            if not kept:
+                continue
+            y0 = kept[0][2][1]                    # el párrafo que venía en el mismo bloque
         plain_all = norm(" ".join(p for p, _, _ in kept))
-        lvl = heading_level(plain_all, size, bold, len(kept), body, ctx["toc_levels"])
+        lvl = 0 if head else heading_level(plain_all, size, bold, len(kept), body, ctx["toc_levels"])
         if lvl:
             items.append((y0, x0, "#" * lvl + " " + plain_all))
             ctx["headings"].append(plain_all)
@@ -751,7 +941,7 @@ def page_to_md(doc, page, ctx):
                 j += 1
             joins, doubts = [], []
             code, n_joined = rebuild_code(lines, code_right(boxes, lines, ctx["bp"]["right"]),
-                                          joins, doubts)
+                                          joins, doubts, ctx["counts"])
             ctx["code_joined"] += n_joined
             ctx.setdefault("code_joins", []).extend((page.number + 1, a, b) for a, b in joins)
             ctx.setdefault("code_doubts", []).extend((page.number + 1, a, b) for a, b in doubts)
@@ -810,11 +1000,30 @@ def merge_blocks(blocks):
     return "\n\n".join(out)
 
 
-def table_rows(page, t, lost=None):
+def mono_box(page, t):
+    """Renglones de un recuadro de una columna cuyo texto es todo de letra de código (un
+    diagrama de flujo con flechas de texto, o código con borde), con su posición, para
+    reconstruirlo como bloque de código; None si no lo es (E24). Como tabla de una celda
+    perdía los saltos de renglón y la sangría."""
+    lines = []
+    for b in page.get_text("dict", clip=pymupdf.Rect(t.bbox))["blocks"]:
+        for ln in b.get("lines", []):
+            spans = [s for s in ln["spans"] if s["text"].strip()]
+            if not spans:
+                continue
+            if not all(MONO.search(s["font"]) for s in spans):
+                return None
+            bb = ln["bbox"]
+            text = "".join(s["text"] for s in ln["spans"]).rstrip()   # como en block_lines
+            lines.append((text, bb[0], bb[2], bb[1], bb[3], spans[0]["size"]))
+    return lines if len(lines) >= 2 else None
+
+
+def table_rows(page, t, lost=None, cuts=None):
     """Texto de cada celda de una tabla con bordes, leído de sus tramos. `Table.extract()`
     de PyMuPDF pega las palabras cuando el espacio mide menos de 3 pt (letra de 10 pt o
     menos: «sin cambios» queda «sincambios») y aplana superíndices y subíndices (E4)."""
-    return [[cell_md(page, pymupdf.Rect(c), lost) if c else "" for c in row.cells]
+    return [[cell_md(page, pymupdf.Rect(c), lost, cuts) if c else "" for c in row.cells]
             for row in t.rows]
 
 
@@ -927,13 +1136,17 @@ def extract(pdf_path, out_dir):
     toc = doc.get_toc()
     body = body_size(doc)
     vocab, img_pages = set(), Counter()         # palabras del documento; páginas de cada imagen
+    counts = Counter()                          # y cuántas veces aparece cada una
     for page in doc:
-        vocab.update(re.findall(r"[^\W\d_]+", page.get_text().lower()))
+        page_words = re.findall(r"[^\W\d_]+", page.get_text().lower())
+        vocab.update(page_words)
+        counts.update(page_words)
         img_pages.update({info["xref"] for info in page.get_image_info(xrefs=True) if info["xref"]})
     ctx = dict(body=body, assets=assets, bp=find_boilerplate(doc, body, toc), code_joined=0,
                toc_levels={key(t): lvl - min(x[0] for x in toc) + 1 for lvl, t, _ in toc},
+               toc_pages=toc_by_page(toc),
                img_names={}, img_pages=img_pages, img_repeat=max(3, 0.3 * doc.page_count),
-               vocab=vocab, hyphens=[], scripts_lost=[],
+               vocab=vocab, counts=counts, hyphens=[], scripts_lost=[],
                figures=[], scanned=[], headings=[], pending_bullet=False)
 
     pages_md, report_rows, info_rows, all_removed, cover_lines = [], [], [], set(), []
@@ -941,7 +1154,7 @@ def extract(pdf_path, out_dir):
     for page in doc:
         md, notes, removed, raw = page_to_md(doc, page, ctx)
         all_removed.update(removed)
-        cov, miss = coverage(raw, md, removed, vocab)
+        cov, miss = coverage(raw, md, removed + ctx.get("cuts", {}).get("parts", []), vocab)
         # Portada: poco texto y con letra grande -> comentario
         biggest = max((s["size"] for b in page.get_text("dict")["blocks"]
                        for ln in b.get("lines", []) for s in ln["spans"]), default=0)

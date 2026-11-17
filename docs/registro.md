@@ -83,3 +83,33 @@ Rehecho como el manual 2 sin tocar la fuente: el original de `sources/` no se co
 
 Temporales borrados al terminar: las copias y scripts de este trabajo y la carpeta de la
 sesión del 16/11.
+
+---
+
+## 17/11/2026 · Extractor: E20 a E24 (`tools/extraer.py`)
+
+Commit `79fea4f` en `main` antes de empezar (todo lo anterior). Cambios y cómo se probaron
+(detalle en `docs/auditoria.md`, 14.6):
+
+- E20 `bookmark_head`, `toc_by_page`, `mark_key`; E21 en `page_to_md` (puntos sueltos);
+  E22 `wrapped` en `rebuild_code` (con `counts`, cuántas veces aparece cada palabra);
+  E23 `open_last_row` en `ruled_tables` y `cut_word` en `cell_md` (con `cuts`: conteos y
+  trozos unidos, para que `build_table` y la cobertura no los den por faltantes); E24
+  `mono_box`.
+- Pruebas nuevas en `tests/test_mejoras.py` (143 en total, todas OK).
+- Regresión sin la fuente: se extrajeron con la versión anterior (`git show HEAD:`) y con
+  la nueva los PDF de `output/` de los manuales 1, 2 y 4, y se comparó con su `.md`
+  (`verdad.py`: cada renglón unido está tal cual en el `.md`; `dudosos.py`: cuántos cortes
+  reales quedaron sin unir; `reglas2.py`: aciertos y errores de cada regla candidata).
+- **Falló y se corrigió:** la primera versión de `open_last_row` metía el pie de página en
+  la última fila; esas tablas no se armaban y `find_tables` las partía en 14 columnas
+  (manual 2, p.11 y p.16). Ahora el renglón debe empezar en una columna, no se mira la
+  zona del pie y, si la tabla ampliada no se arma, queda la original.
+- **Falló y se corrigió:** el cierre `}` se unía sin espacio; el `.md` mostró que `}` lleva
+  espacio y `)` no.
+- La regla de E22 se ajustó con el manual 2 y se comprobó con el 1 y el 4 (no usados para
+  ajustarla): 52 de 52 y 17 de 17 uniones correctas.
+- **Visto, no resuelto (N17):** un párrafo que toca la línea de cierre de una tabla se
+  pierde; la cobertura lo marca.
+- Los originales de la serie no se usaron: E20, E21 y E24 se probaron con PDF que imitan
+  lo que mostraba su extracción, no con el original.

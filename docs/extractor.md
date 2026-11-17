@@ -116,7 +116,7 @@ La sección «Notas (no requieren acción)» es informativa: portada pasada a la
 | **Faltan en ...** (Word, PowerPoint, Excel) | El reporte dice en qué parte del archivo está lo que no se extrajo: pies de página, notas al pie, cuadros de texto, SmartArt, comentarios. La cobertura se calcula contra el archivo real, no contra lo extraído. | Agregar ese texto en su lugar, o en un comentario si es un pie repetido. |
 | **Imágenes en el original: N \| extraídas: M** | Hay imágenes que no se guardaron (por ejemplo, las de un marcador de posición de PowerPoint). | Exportarlas con un script a `assets/` y referenciarlas. |
 | **Texto único en la zona de encabezado/pie, conservado en el cuerpo** | Suele ser una nota al pie: aparece una sola vez, así que no se trató como pie repetido. | Dejarlo donde corresponde (junto a su llamada) o borrarlo si de verdad era un pie. |
-| **Renglones de código reunidos** | El extractor unió renglones que el original partió por falta de ancho. Une solo si se dan tres cosas: la primera palabra del siguiente no cabía al final del anterior, el siguiente empieza en el borde izquierdo, y el anterior quedó a medias (comillas o paréntesis sin cerrar, o termina en coma u operador). El reporte lista cada unión al final, con su página. | Revisar **todas**: si lo unido es otra instrucción, separarlo en su propio renglón con su sangría. |
+| **Renglones de código reunidos** | El extractor unió renglones que el original partió por falta de ancho. Siempre hace falta que la primera palabra del siguiente no cupiera al final del anterior. Si el siguiente empieza en el borde izquierdo, se une cuando el anterior quedó a medias (comillas o paréntesis sin cerrar, o termina en coma u operador). Si viene 4 letras más adentro (E22), se une cuando el corte cayó a media palabra, en un comentario, con comillas o un paréntesis abierto, antes de un cierre (`);`, `};`, `/>`) o entre dos palabras sin un final de autor (coma, paréntesis, operador, la cabecera de un `if`). El reporte lista cada unión al final, con su página. | Revisar **todas**: si lo unido es otra instrucción, separarlo en su propio renglón con su sangría. |
 | **Renglones de código que podrían estar partidos (no se unieron)** | No cabían juntos, pero el segundo tiene sangría propia o el primero está completo (o es un comentario): se dejaron como en el original. | Leer la lista. Unir a mano solo los que continúan la misma instrucción. |
 | **Diagramas con texto** (`assets/p<N>-diagrama<M>.png`) | Cajas unidas por flechas: el texto de las cajas y de las flechas ya está en el `.md`, pero suelto y sin decir qué se conecta con qué. Pasarlo a `describir-figuras`. | `<!-- DIAGRAMA ORIGINAL (p.N): ... -->`, una tabla `Componente / Detalle` y otra `Desde / Hacia / Conexión`, en lugar del texto suelto. La imagen no se inserta. |
 | **Símbolos sin mapa de caracteres** | La fuente del original no dice qué carácter es (casillas, flechas): quedan como `[SIMBOLO?]` en el `.md`. `validar.py` los rechaza. | Reemplazar cada uno por el símbolo que se ve en esa página (una casilla vacía: `[ ]`). |
@@ -144,8 +144,9 @@ La extracción está completa cuando se cumple todo:
 - [ ] No queda ningún `FIGURA: describir`, `TRANSCRIBIR` ni tabla sin reconstruir:
       `grep -n "describir\|TRANSCRIBIR\|SIMBOLO?" extracted/<nombre>/<nombre>.md` no devuelve nada.
 - [ ] Los títulos detectados coinciden con los marcadores del PDF original (cuando los tiene),
-      **en cantidad y en nivel**: `grep -c "^# "`, `"^## "`, `"^### "`. Todos en un mismo nivel
-      es un defecto conocido (auditoría, E20): se corrige al preparar el documento.
+      **en cantidad y en nivel**: `grep -c "^# "`, `"^## "`, `"^### "`. El nivel sale del
+      marcador de la misma página (auditoría, E20); todos en un mismo nivel indica que el
+      original no tiene marcadores o que no coinciden: se corrige al preparar.
 - [ ] Ningún diagrama ni recuadro de texto quedó aplanado (negritas sueltas sin frases).
 - [ ] Los enlaces conservan su URL (`[texto](url)` o línea `Enlaces:` al final de la página).
 - [ ] La portada y los encabezados/pies quedaron en la cabecera o en comentarios.
@@ -203,8 +204,8 @@ información para quien lea el `.md`.
 | Bloque de código dividido | Cambio de página en el original. | Unir los dos bloques al preparar el documento. |
 | Código sin sangría o con renglones partidos | El PDF da la sangría por posición y parte los renglones largos. | El extractor los reconstruye (sangría por posición, renglones reunidos). Sin recuadro de fondo ni texto normal en el documento no puede saber el ancho y no reúne nada. |
 | "No se extrajo: el .md fue editado a mano" | Ya hay una extracción con trabajo manual. | Seguir usando esa. Solo si el original cambió: `--forzar` y recuperar el trabajo desde `<nombre>.anterior.md`. |
-| Todos los títulos en `###` y el capítulo como «PARTE I · CAPÍTULO 1 Título» | El título de la página no coincide con el del marcador del PDF y el extractor no usa su nivel (auditoría, E20). | Al preparar: partes y capítulos en `#`, secciones en `##`, con un script. |
-| El índice del original quedó en el cuerpo | Los puntos guía vienen de a uno y no se reconocen (E21). | Al preparar: cada página de índice a un comentario. |
-| Un renglón de código cortado a media palabra | El original lo cortó por ancho y la continuación trae sangría propia (E22). | Unirlos a mano con la lista del reporte: los que terminan a media palabra y siguen 4 espacios más adentro. |
+| Partes en `#`, capítulos en `##` y secciones en `###` | El extractor toma el nivel de los marcadores del PDF, también cuando el título de la página lleva un antetítulo («PARTE I · CAPÍTULO 1 …», auditoría E20). | Si el manual quiere los capítulos en `#` (cada uno en página nueva), pasarlos al preparar. |
+| Una página de índice en el cuerpo | El extractor la reconoce también con los puntos guía de a uno (E21); si quedó alguna, el original usa otro dibujo. | Al preparar: cada página de índice a un comentario. |
+| Un renglón de código cortado que no se unió | Con sangría +4 se une solo en los casos seguros (E22); tras una coma no se distingue de un argumento por renglón. | Revisar la lista de dudosos del reporte y unir a mano los que continúan la misma instrucción. |
 | Una tabla salió como párrafos | Su dibujo no se pudo interpretar. | El reporte la marca; reconstruirla con el recorte. |
 | "Formato no soportado" | Formato antiguo o poco común. | Convertir según el Paso 0. |

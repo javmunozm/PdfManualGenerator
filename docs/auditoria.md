@@ -505,3 +505,21 @@ Son cinco, todos del mismo diseño de origen; el manual 3 los va a traer:
 | Manual 1: rehecho como el manual 2 y traducido al inglés (detalle en `docs/registro.md`). | **Resuelto**: validar 0/0, `comparar --estricto` código 0. **No verificado contra el original** (permiso denegado): se comparó con `extracted/`; el diagrama 3.1 y la disposición del flujo 8.1 se tomaron del manual 2 (mismas palabras). |
 
 Pruebas al 17/11/2026: 134, todas OK.
+
+### 14.6 Extractor: E20 a E24 (17/11/2026)
+
+Probado con PDF propios en `tests/test_mejoras.py` y, como regresión, extrayendo los PDF
+que `manual.py` generó para los manuales 1, 2 y 4 (su `.md` es la verdad). Los originales
+de la serie **no** se usaron (permiso denegado): lo que depende de cómo están dibujados se
+reprodujo de lo que mostraba su extracción.
+
+| ID | Estado |
+|---|---|
+| E20 | **Resuelto**, con prueba. Un bloque cuyos primeros renglones (en negrita o letra grande) terminan con el texto de un marcador **de su misma página** toma el nivel del marcador; el texto del bloque se conserva entero («PARTE I · CAPÍTULO 1 …»). Si el título venía en el mismo bloque que su párrafo, se separan. El nivel es el del marcador (en esta serie: partes `#`, capítulos `##`, secciones `###`); pasar los capítulos a `#` sigue siendo un paso de preparación. |
+| E21 | **Resuelto**, con prueba. Causa reproducida: título, puntos y número quedan en tres renglones y los de puntos son un tercio (la regla pedía 40%). Ahora también se reconoce la página si los puntos sueltos son el 60% de sus palabras; en el comentario cada número va con su título. |
+| E22 | **Resuelto en parte**, con prueba. Una continuación con sangría +4 se une si el corte cayó a media palabra, en un comentario, con comillas o un paréntesis abierto, antes de un cierre (`);`, `};`, `/>`) o entre dos palabras sin un final de autor (`,`, `(`, operador, cabecera de `if`). En los tres PDF generados: 123 renglones unidos, **todos iguales a su `.md`**; quedan 57 cortes reales en la lista de dudosos (casi todos tras una coma, que no se distingue de un argumento por renglón). |
+| E23 | **Resuelto**, con prueba. La fila sin línea de cierre entra en la tabla si su texto empieza en las columnas de la tabla y no las cruza; si la tabla resultante no se puede armar, queda como estaba. El identificador partido en una celda se une si los trozos juntos son una palabra del documento y parece un identificador. En el manual 2 generado, 6 celdas que salían partidas salen enteras. |
+| E24 | **Resuelto**, con prueba de la función. Una tabla de una columna cuyo texto es todo de letra de código sale como bloque de código con su sangría (`mono_box`). `find_tables` no detecta un recuadro así dibujado con reportlab, así que la prueba simula la tabla detectada. |
+| N17 (nuevo) | Abierto. Un párrafo cuyo texto toca la línea de cierre de una tabla se pierde al extraer; el reporte lo marca (cobertura menor a 100% en esa página), no es silencioso. Visto con un PDF de prueba, no en un original. |
+
+Pruebas: 143, todas OK.

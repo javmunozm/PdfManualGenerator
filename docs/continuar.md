@@ -5,8 +5,8 @@ Lo hecho está en `docs/registro.md` (qué, con qué scripts, qué quedó dudoso
 
 ## Hecho el 17/11/2026
 - Manual 2: PDF regenerado y verificado.
-- Pruebas: 134, todas OK (avisos de conversión, `region.py`, diagramas, recuadros pegados,
-  coherencia de opciones citadas).
+- Pruebas: 143, todas OK (avisos de conversión, `region.py`, diagramas, recuadros pegados,
+  coherencia de opciones citadas, extractor E20 a E24).
 - Guías y skills al día; `CLAUDE.md`: regla 8 (validar 0/0 obligatorio en todo documento)
   y regla 10 (trabajo sobre temporales, índice en `docs/registro.md`).
 - Manual 4: rótulos de código, código en línea partido, títulos de bloque, celdas git.
@@ -20,14 +20,14 @@ Lo hecho está en `docs/registro.md` (qué, con qué scripts, qué quedó dudoso
   (permiso denegado) y `extracted/` solo se lee.
 
 ## Pendiente
-1. **Extractor (auditoría 14.2):** E20 (títulos y niveles desde los marcadores), E21 (índice
-   con puntos guía de a uno), E22 (código cortado por ancho con +4 de sangría), E23 (última
-   fila fuera de la tabla; identificador partido en una celda), y la parte de E24 que falta
-   (recuadro con letra de código y flechas que sale como tabla de una celda). En los
-   manuales 1 y 2 se corrigieron a mano; el manual 3 los va a traer.
+1. **Extractor:** E20 a E24 resueltos (auditoría 14.6), probados con PDF propios y con los
+   PDF generados, no con los originales de la serie. Con el manual 3 se verá si alcanzan.
+   Quedan: los cortes de código tras una coma (lista de dudosos) y N17 (párrafo pegado a
+   la línea de cierre de una tabla).
 2. **Manual 1, dudoso:** el diagrama 3.1 y la disposición del flujo 8.1 se tomaron del
    manual 2 (mismas palabras). Confirmarlos contra el original solo si el usuario lo autoriza.
-3. **Git:** nada confirmado. Hacer commit solo cuando el usuario lo pida.
+3. **Git:** el trabajo hasta los manuales está en el commit `79fea4f` de `main` (local, sin
+   push). Lo del extractor (E20 a E24) está sin confirmar.
 
 ## Cuidados
 - Scripts con Write a un archivo; nunca heredoc ni `python -c` para tocar un `.md`.

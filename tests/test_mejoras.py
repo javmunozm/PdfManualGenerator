@@ -404,6 +404,294 @@ class Diagramas(Caso):
         self.assertNotIn("## Diagramas con texto", self.leer(carpeta, "reporte.md"))
 
 
+def pdf_con_codigo(ruta, filas, texto):
+    """Una página: un párrafo normal y un recuadro gris con `filas` = [(sangría, texto)]
+    en Courier 11 (66 letras por renglón), con la sangría dada por posición."""
+    c = canvas.Canvas(str(ruta), pagesize=A4)
+    c.setFont("Helvetica", 11)
+    c.drawString(70, H - 90, texto)
+    x0, x1, pad, size = 70, 525, 8, 11
+    alto = len(filas) * 14 + 2 * pad
+    c.setFillGray(0.95)
+    c.rect(x0, H - 120 - alto, x1 - x0, alto, fill=1, stroke=0)
+    c.setFillGray(0)
+    c.setFont("Courier", size)
+    for i, (sangria, t) in enumerate(filas):
+        c.drawString(x0 + pad + sangria * 0.6 * size, H - 120 - pad - size - i * 14, t)
+    c.save()
+
+
+class CodigoCortadoConSangria(Caso):
+    """E22: el original corre la continuación 4 letras más adentro. Se une solo si el corte
+    cayó a media palabra, en un comentario, con comillas abiertas o antes de un cierre."""
+    FILAS = [(0, "dotnet add package Mediator.Abstractions --project src/API/API.csp"),
+             (4, "roj"),
+             (0, "/// Una fila de la tabla de usuarios. Se llena con proyección SQL"),
+             (4, "devuelve solo estas columnas."),
+             (4, "protected override async Task HandleAsync(AuthContext context,"),
+             (8, "IsSelfRequirement requirement)"),
+             (4, "public static partial IQueryable<User> ToItems(this IQueryable"),
+             (8, ");"),
+             (0, 'git commit -m "feat(api): usuarios, patrón (Mediator, Result,'),
+             (4, 'FluentValidation)"')]
+
+    def test_E22_continuaciones_con_sangria_mas_4(self):
+        for sangria, t in self.FILAS[0::2]:
+            self.assertLessEqual(sangria + len(t), 66, t)               # cabe en el recuadro
+        pdf = self.tmp / "manual.pdf"
+        pdf_con_codigo(pdf, self.FILAS, "El proyecto API.csproj lista los paquetes de la capa.")
+        rc, out, carpeta = self.extraer(pdf)
+        md = self.leer(carpeta)
+        self.assertIn("```\ndotnet add package Mediator.Abstractions --project src/API/API.csproj\n"
+                      "/// Una fila de la tabla de usuarios. Se llena con proyección SQL devuelve "
+                      "solo estas columnas.\n"
+                      "    protected override async Task HandleAsync(AuthContext context,\n"
+                      "        IsSelfRequirement requirement)\n"             # formato del autor
+                      "    public static partial IQueryable<User> ToItems(this IQueryable);\n"
+                      'git commit -m "feat(api): usuarios, patrón (Mediator, Result, '
+                      'FluentValidation)"\n```', md)
+        reporte = self.leer(carpeta, "reporte.md")
+        reunidos, dudosos = reporte.split("## Renglones de código reunidos")[1].split("\n## ", 1)
+        self.assertEqual(len(re.findall(r"^- p\.1: `…", reunidos, flags=re.M)), 4)
+        self.assertIn("IsSelfRequirement requirement)", dudosos)           # formato del autor: dudoso
+
+    MAS = [(0, "dotnet watch run --project API/API.csproj --urls http://0.0.0.0 (o"),
+           (4, "cualquier puerto libre)"),                                  # paréntesis abierto
+           (0, '<PackageReference Include="FluentValidation" Version="12.1.10.0"'),
+           (4, "/>"),
+           (0, "dotnet add Persistence/Persistence.csproj reference --project"),
+           (4, "Application/Application.csproj"),                           # corte entre palabras
+           (4, "if (h[0] == 0xFF && h[1] == 0xD8 && h[2] == 0xFF && valid)"),
+           (8, 'return ("image/jpeg", ".jpg");')]                          # cabecera de un if
+
+    def test_E22_parentesis_cierre_xml_y_corte_entre_palabras(self):
+        for sangria, t in self.MAS[0::2]:
+            self.assertLessEqual(sangria + len(t), 66, t)
+        pdf = self.tmp / "manual.pdf"
+        pdf_con_codigo(pdf, self.MAS, "Comandos de la capa de datos.")
+        rc, out, carpeta = self.extraer(pdf)
+        self.assertIn("```\ndotnet watch run --project API/API.csproj --urls http://0.0.0.0 (o "
+                      "cualquier puerto libre)\n"
+                      '<PackageReference Include="FluentValidation" Version="12.1.10.0" />\n'
+                      "dotnet add Persistence/Persistence.csproj reference --project "
+                      "Application/Application.csproj\n"
+                      "    if (h[0] == 0xFF && h[1] == 0xD8 && h[2] == 0xFF && valid)\n"
+                      '        return ("image/jpeg", ".jpg");\n```', self.leer(carpeta))
+
+
+class IdentificadorPartidoEnCelda(Caso):
+    """E23: una celda angosta parte un identificador en dos renglones; al extraer quedaba
+    con un espacio en medio («Authentication.Op enIdConnect»)."""
+
+    def test_E23_el_identificador_se_une_y_dos_palabras_no(self):
+        pdf = self.tmp / "tabla.pdf"
+        c = canvas.Canvas(str(pdf), pagesize=A4)
+        c.setFont("Helvetica", 11)
+        c.drawString(70, H - 80, "Paquetes que usa la capa API del proyecto.")
+        for y in (H - 100, H - 120, H - 155):                       # solo líneas horizontales
+            c.line(70, y, 520, y)
+        c.setFont("Helvetica", 10)
+        c.drawString(75, H - 114, "Paquete")
+        c.drawString(295, H - 114, "Uso")
+        c.drawString(75, H - 133, "Microsoft.AspNetCore.Authentication.Op")
+        c.drawString(75, H - 146, "enIdConnect")
+        c.drawString(295, H - 133, "Cliente OIDC del")
+        c.drawString(295, H - 146, "backend BFF")
+        c.setFont("Courier", 10)
+        c.drawString(70, H - 200, "dotnet add package Microsoft.AspNetCore.Authentication.OpenIdConnect")
+        c.save()
+        rc, out, carpeta = self.extraer(pdf)
+        md = self.leer(carpeta)
+        self.assertIn("| Microsoft.AspNetCore.Authentication.OpenIdConnect | Cliente OIDC del backend BFF |", md)
+
+
+class RecuadroDeCodigoConBorde(Caso):
+    """E24: un recuadro con borde, de una columna y con todo el texto en letra de código
+    (un flujo dibujado con flechas de texto) salía como tabla de una celda con los
+    renglones en línea. Debe salir como bloque de código con su sangría."""
+
+    def test_E24_flujo_con_letra_de_codigo_es_un_bloque_de_codigo(self):
+        pdf = self.tmp / "flujo.pdf"
+        c = canvas.Canvas(str(pdf), pagesize=A4)
+        c.setFont("Helvetica", 11)
+        c.drawString(70, H - 80, "Cada peticion recorre siempre el mismo camino.")
+        top, bottom = H - 100, H - 200
+        c.rect(70, bottom, 450, top - bottom, stroke=1, fill=0)
+        c.line(70, top - 20, 520, top - 20)                         # franja del título
+        c.setFont("Courier", 10)
+        c.drawString(78, top - 14, "El camino de una peticion")
+        for i, (sangria, t) in enumerate([(2, "Navegador --HTTP--> UsersController"),
+                                          (12, "|"), (12, "v"),
+                                          (8, "Mediator --> ValidationBehavior")]):
+            c.drawString(78 + 6 * sangria, top - 38 - 14 * i, t)
+        c.save()
+        rc, out, carpeta = self.extraer(pdf)
+        md = self.leer(carpeta)
+        self.assertNotIn("| ", md)                                    # no es una tabla
+        self.assertIn("  Navegador --HTTP--> UsersController\n            |\n            v\n"
+                      "        Mediator --> ValidationBehavior\n```", md)
+        self.assertIn("```\nEl camino de una peticion\n", md)           # el rótulo, primera línea
+
+    def test_E24_mono_box_da_los_renglones_con_su_posicion(self):
+        # find_tables no detecta un recuadro de una columna dibujado con reportlab; en el
+        # original sí lo detectaba (salía como tabla de una celda). Se prueba la función
+        # con la tabla simulada: solo hace falta su rectángulo.
+        import sys
+        from types import SimpleNamespace
+        sys.path.insert(0, str(RAIZ / "tools"))
+        import extraer
+        pdf = self.tmp / "flujo.pdf"
+        c = canvas.Canvas(str(pdf), pagesize=A4)
+        c.setFont("Courier", 10)
+        for i, (sangria, t) in enumerate([(0, "El camino de una peticion"), (2, "Navegador --> API"),
+                                          (6, "|"), (4, "Mediator")]):
+            c.drawString(78 + 6 * sangria, H - 120 - 14 * i, t)
+        c.setFont("Helvetica", 10)
+        c.drawString(78, H - 300, "Texto normal fuera del recuadro.")
+        c.save()
+        with pymupdf.open(pdf) as doc:
+            page = doc[0]
+            caja = SimpleNamespace(bbox=(70, 100, 520, 190), col_count=1)
+            lines = extraer.mono_box(page, caja)
+            self.assertEqual(len(lines), 4)
+            code, _ = extraer.rebuild_code(lines, 0)
+            self.assertEqual(code, "El camino de una peticion\n  Navegador --> API\n      |\n    Mediator")
+            mixta = SimpleNamespace(bbox=(70, 100, 520, 310), col_count=1)
+            self.assertIsNone(extraer.mono_box(page, mixta))              # hay texto normal
+
+    def test_E24_una_caja_de_texto_normal_sigue_siendo_un_cuadro(self):
+        pdf = self.tmp / "caja.pdf"
+        c = canvas.Canvas(str(pdf), pagesize=A4)
+        c.rect(70, H - 160, 450, 60, stroke=1, fill=0)
+        c.setFont("Helvetica", 11)
+        c.drawString(78, H - 120, "Nota: el archivo .env no se sube al repositorio.")
+        c.drawString(78, H - 136, "Cada desarrollador crea el suyo a partir del ejemplo.")
+        c.save()
+        rc, out, carpeta = self.extraer(pdf)
+        self.assertNotIn("```", self.leer(carpeta))
+
+
+class IndiceConPuntosSueltos(Caso):
+    """E21: el índice del original da título, puntos guía y número en renglones separados;
+    los renglones con puntos eran un tercio y la página no se reconocía como índice."""
+    ENTRADAS = [("Parte I · Fundamentos", "5"), ("1. Introduccion: que vas a construir", "6"),
+                ("1.1 Esta edicion: variante Mediator", "6"), ("1.2 Que incluye el sistema", "6"),
+                ("1.3 Roles y atribuciones", "7"), ("1.4 Stack y versiones", "7"),
+                ("2. Requisitos previos", "10"), ("2.1 Verificar la instalacion", "10")]
+
+    def test_E21_la_pagina_de_indice_va_a_un_comentario(self):
+        pdf = self.tmp / "indice.pdf"
+        c = canvas.Canvas(str(pdf), pagesize=A4)
+        c.setFont("Helvetica", 10)
+        for i, (t, p) in enumerate(self.ENTRADAS):
+            y = H - 100 - 16 * i
+            c.drawString(70, y, t)
+            for x in range(300, 500, 5):
+                c.drawString(x, y, ".")
+            c.drawRightString(520, y, p)
+        c.showPage()
+        c.setFont("Helvetica", 11)
+        c.drawString(70, H - 100, "Introduccion: que vas a construir. Este manual arma el sistema completo.")
+        c.save()
+        rc, out, carpeta = self.extraer(pdf)
+        md = self.leer(carpeta)
+        self.assertIn("<!-- p.1 ÍNDICE ORIGINAL: Parte I · Fundamentos 5 | 1. Introduccion: que vas a "
+                      "construir 6 | 1.1 Esta edicion: variante Mediator 6 |", md)
+        self.assertNotIn(". . . .", md)
+        self.assertIn("índice original", self.leer(carpeta, "reporte.md"))
+
+
+class TitulosDesdeMarcadores(Caso):
+    """E20: el título de la página («PARTE I · CAPÍTULO 1 Introducción») no es igual al del
+    marcador («1. Introducción»): con cinco marcadores o más, todo salía en ###."""
+    RELLENO = ("Este parrafo explica el tema con texto normal de relleno suficiente para que "
+               "el cuerpo tenga su tamano de letra.")
+
+    def pdf(self, ruta):
+        c = canvas.Canvas(str(ruta), pagesize=A4)
+
+        def titulo(renglones, y, size, clave, texto, nivel):
+            c.bookmarkPage(clave, top=H - y + 20)
+            c.addOutlineEntry(texto, clave, level=nivel)
+            c.setFont("Helvetica-Bold", size)
+            for i, r in enumerate(renglones):
+                c.drawString(70, H - y - i * (size + 3), r)
+
+        def parrafos(y, n=3):
+            c.setFont("Helvetica", 11)
+            for i in range(n):
+                c.drawString(70, H - y - 16 * i, self.RELLENO[:95])
+
+        c.setFont("Helvetica-Bold", 28)                              # portada (va a la cabecera)
+        c.drawString(70, H - 200, "Manual de prueba")
+        c.showPage()
+        titulo(["PARTE I", "Fundamentos"], 100, 20, "p1", "Parte I · Fundamentos", 0)
+        parrafos(170)
+        c.showPage()
+        titulo(["PARTE I · CAPÍTULO 1", "Introducción: qué vas a construir"], 100, 16, "c1",
+               "1. Introducción: qué vas a construir", 1)
+        parrafos(160)
+        titulo(["1.1 Esta edición: variante"], 240, 13, "s11", "1.1 Esta edición: variante", 2)
+        parrafos(270)
+        c.showPage()
+        titulo(["PARTE II · CAPÍTULO 2", "Infraestructura y", "base de datos"], 100, 13, "c2",
+               "2. Infraestructura y base de datos", 1)
+        c.setFont("Helvetica", 11)
+        c.drawString(70, H - 100 - 3 * 16, "En este capitulo levantamos la base y el proveedor.")
+        parrafos(200)
+        titulo(["2.1 Variables de entorno"], 280, 13, "s21", "2.1 Variables de entorno", 2)
+        parrafos(310)
+        c.save()
+
+    def test_E20_niveles_del_marcador_y_titulo_fundido_separado(self):
+        pdf = self.tmp / "marcadores.pdf"
+        self.pdf(pdf)
+        rc, out, carpeta = self.extraer(pdf)
+        md = self.leer(carpeta)
+        heads = [l for l in md.splitlines() if l.startswith("#")]
+        self.assertEqual(heads, ["# PARTE I Fundamentos",
+                                 "## PARTE I · CAPÍTULO 1 Introducción: qué vas a construir",
+                                 "### 1.1 Esta edición: variante",
+                                 "## PARTE II · CAPÍTULO 2 Infraestructura y base de datos",
+                                 "### 2.1 Variables de entorno"], md)
+        self.assertIn("En este capitulo levantamos la base y el proveedor.", md)
+
+
+class UltimaFilaSinLinea(Caso):
+    """E23: antes del cambio de página el original no dibuja la línea de cierre de la tabla
+    y la última fila quedaba como un párrafo debajo de ella."""
+
+    def tabla(self, c, filas, top, cerrar):
+        c.setFont("Helvetica", 10)
+        ys = [top - 18 * i for i in range(len(filas) + 1)]
+        for y in ys[:len(filas) + (1 if cerrar else 0)]:
+            c.line(70, y, 520, y)
+        for (a, b, d), y in zip(filas, ys):
+            for x, t in zip((75, 230, 330), (a, b, d)):
+                c.drawString(x, y - 13, t)
+
+    def test_E23_la_fila_sin_linea_de_cierre_entra_en_la_tabla(self):
+        pdf = self.tmp / "versiones.pdf"
+        c = canvas.Canvas(str(pdf), pagesize=A4)
+        c.setFont("Helvetica", 11)
+        c.drawString(70, H - 80, "Versiones de referencia de cada pieza del sistema.")
+        self.tabla(c, [("Pieza", "Version", "Funcion"), ("Keycloak", "26.7", "Identidad OIDC"),
+                       ("PostgreSQL", "17", "Base de Keycloak"),
+                       ("Vue / Vite", "3.5 / 8", "SPA con script setup")], H - 100, cerrar=False)
+        c.showPage()
+        self.tabla(c, [("Pieza", "Version", "Funcion"), ("Pinia", "4", "Sesion y rutas"),
+                       ("Tailwind CSS", "4.3", "Estilos")], H - 100, cerrar=True)
+        c.setFont("Helvetica", 11)
+        c.drawString(70, H - 100 - 18 * 3 - 22, "Estas versiones se verificaron en octubre de 2026 con el repositorio.")
+        c.save()
+        rc, out, carpeta = self.extraer(pdf)
+        md = self.leer(carpeta)
+        self.assertIn("| PostgreSQL | 17 | Base de Keycloak |\n| Vue / Vite | 3.5 / 8 | SPA con script setup |", md)
+        self.assertNotIn("\nVue / Vite 3.5 / 8 SPA con script setup", md)        # no quedó suelta
+        self.assertIn("| Tailwind CSS | 4.3 | Estilos |\n\n", md)                # tabla cerrada:
+        self.assertIn("Estas versiones se verificaron en octubre", md)            # el párrafo, aparte
+
+
 class Coherencia(unittest.TestCase):
     """Toda opción `--algo` que citan las skills y las guías existe en su script."""
     DOCS = [*RAIZ.glob(".claude/skills/*/SKILL.md"), *RAIZ.glob(".claude/agents/*.md"),
