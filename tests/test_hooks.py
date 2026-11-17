@@ -157,8 +157,8 @@ class Flujo(unittest.TestCase):
     def test_H4_no_deja_cerrar_con_un_pdf_mas_viejo_que_su_md_y_no_insiste(self):
         md = self.md("documentos", "e", "---\ntitulo: E\n---\n\n# Uno\n\nTexto.\n")
         self.assertIsNone(self.hook("Stop"))                              # sin PDF: en trabajo
-        pdf = self.raiz / "output" / "e.pdf"
-        pdf.parent.mkdir()
+        pdf = self.raiz / "output" / "e" / "e.pdf"
+        pdf.parent.mkdir(parents=True)
         pdf.write_bytes(b"%PDF-1.4")
         os.utime(md, (pdf.stat().st_mtime + 60, pdf.stat().st_mtime + 60))
         salida = self.hook("Stop")

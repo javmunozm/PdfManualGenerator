@@ -551,6 +551,22 @@ def build_table(page, rect, ys):
 
 
 # ---------------------------------------------------------------------------
+def diagram_like(page, r, rects):
+    """¿Un grupo de dibujos con texto es un diagrama de cajas y flechas? Tiene que haber
+    al menos tres cajas que no se contienen entre sí, dos conectores (trazos finos fuera
+    de las cajas) y texto en renglones cortos: rótulos, no párrafos ni código."""
+    boxes = [b for b in rects if b.width > 40 and b.height > 14
+             and b.get_area() < 0.5 * r.get_area()]
+    boxes = [b for k, b in enumerate(boxes)
+             if not any(o.contains(b) and o != b for o in boxes[:k] + boxes[k + 1:])]
+    lines = [b for b in rects if (b.width < 3 or b.height < 3) and max(b.width, b.height) > 8
+             and not any(o.contains(b) for o in boxes)]
+    texts = [l.strip() for l in page.get_text(clip=r).splitlines() if l.strip()]
+    if len(boxes) < 3 or len(lines) < 2 or len(texts) < 4:
+        return False
+    return sorted(len(t) for t in texts)[len(texts) // 2] <= 45
+
+
 def page_to_md(doc, page, ctx):
     n = page.number + 1
     W, H = page.rect.width, page.rect.height
@@ -630,10 +646,20 @@ def page_to_md(doc, page, ctx):
     for i, r in enumerate(clusters):
         if r.width < 120 or r.height < 80 or any(r.intersects(t) for t in t_rects):
             continue
-        if sum(1 for d in drawings if r.contains(d["rect"])) < 6:
+        inside = [d["rect"] for d in drawings if r.contains(d["rect"])]
+        if len(inside) < 6:
             continue  # caja o fondo simple, no es un gráfico
         if len(page.get_text(clip=r).strip()) > r.get_area() / 400:
-            continue  # cuadro con texto: el texto ya se extrae
+            # Cuadro con texto: el texto ya se extrae. Pero si son varias cajas unidas
+            # por flechas es un diagrama: sus rótulos quedan como texto suelto, sin decir
+            # qué se conecta con qué (E24). Se guarda el recorte y queda como pendiente.
+            if diagram_like(page, r, inside):
+                name = f"p{n}-diagrama{i + 1}.png"
+                page.get_pixmap(clip=r, dpi=130).save(str(assets / name))
+                items.append((r.y0, r.x0, ("IMG", name, r)))
+                ctx["figures"].append(f"assets/{name}")
+                ctx.setdefault("diagrams", []).append((n, name))
+            continue
         name = f"p{n}-vec{i + 1}.png"
         page.get_pixmap(clip=r, dpi=110).save(str(assets / name))
         items.append((r.y0, r.x0, ("IMG", name, r)))
@@ -1010,6 +1036,12 @@ def extract(pdf_path, out_dir):
     if pending_figs:
         rep += ["", "## Figuras pendientes de describir", "",
                 *[f"- `{f}`" for f in dict.fromkeys(pending_figs)]]
+    if ctx.get("diagrams"):
+        rep += ["", "## Diagramas con texto", "",
+                "Cajas unidas por flechas: los rótulos están en el `.md` como texto suelto, sin "
+                "decir qué se conecta con qué. Pasar cada uno a `describir-figuras`, que reemplaza "
+                "ese texto por una tabla de componentes y otra de conexiones.", "",
+                *[f"- p.{p}: `assets/{name}`" for p, name in ctx["diagrams"]]]
     if ctx.get("code_joins"):
         rep += ["", "## Renglones de código reunidos", "",
                 "Cada línea: página, final del renglón y lo que se le unió. Es correcto solo si "

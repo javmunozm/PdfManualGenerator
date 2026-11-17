@@ -5,13 +5,14 @@ Uso:
     python tools/estado.py            una línea por documento que tiene algo pendiente
     python tools/estado.py --todo     también los que están terminados
 
-Mira solo extracted/, documentos/ y output/ (nunca sources/) y dice, por documento:
+Mira solo extracted/, documentos/ y output/ (nunca sources/) y dice, por documento
+(cada uno con su carpeta en las tres: extracted/<n>/, documentos/<n>/ y output/<n>/):
 
     extraído, sin preparar          hay extracted/<n>/ y no documentos/<n>/
     pendientes en la extracción     quedan figuras por describir, páginas por transcribir
                                     o símbolos sin identificar
     traducción en curso             existe documentos/<n>/partes/
-    sin PDF                         hay documentos/<n>/<n>.md y no output/<n>.pdf
+    sin PDF                         hay documentos/<n>/<n>.md y no output/<n>/<n>.pdf
     PDF desactualizado              el .md es más nuevo que su PDF
     sin verificar / verificación fallida   según el registro que deja tools/comparar.py
 
@@ -43,11 +44,12 @@ def status(root="."):
     root = Path(root)
     ext, docs, out = root / "extracted", root / "documentos", root / "output"
     names = sorted({p.name for base in (ext, docs) if base.is_dir() for p in base.iterdir() if p.is_dir()})
-    record = read_record(out)
     result = []
     for n in names:
         todo = []
-        src_md, md, pdf = ext / n / f"{n}.md", docs / n / f"{n}.md", out / f"{n}.pdf"
+        # cada documento tiene su carpeta en output/, con su PDF, su registro y sus hojas
+        src_md, md, pdf = ext / n / f"{n}.md", docs / n / f"{n}.md", out / n / f"{n}.pdf"
+        record = read_record(pdf.parent)
         if src_md.is_file():
             try:
                 text = src_md.read_text(encoding="utf-8", errors="replace")

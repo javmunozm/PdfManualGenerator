@@ -23,21 +23,29 @@ sources/ --extraer.py--> extracted/ --preparar.py--> documentos/ --validar.py, m
    y se vuelve a generar. Nunca se edita el PDF.
 6. **Resultados a archivos, resúmenes a la terminal.** No imprimir documentos completos.
 7. **No volver a extraer lo ya extraído.** `extraer.py` lo impide salvo `--forzar`.
-8. **Un PDF no está terminado hasta que `tools/comparar.py` termina con código 0.**
+8. **Un PDF no está terminado hasta que `tools/validar.py` da 0 errores y 0 avisos y
+   `tools/comparar.py` termina con código 0.** Las dos son obligatorias en todo documento:
+   `comparar.py` cuenta palabras; la estructura (títulos, tablas, cuadros, código) la
+   revisa `validar.py`.
 9. **El contenido sale de `sources/`.** Si el manual no parte de un archivo de `sources/`,
    el contenido se investiga en la web según lo que el lector (el usuario u otra persona)
    necesita aprender; no se escribe de memoria. La regla 5 habla de qué se edita, no de
    dónde sale el contenido.
+10. **Se trabaja sobre temporales.** Lo que pisaría trabajo hecho (`--forzar`) se hace en
+    copias del scratchpad (`preparar.py --salida <temp>`); la fuente no se toca nunca.
+    Al terminar, los temporales se borran y en `docs/registro.md` queda qué se hizo, con
+    qué scripts y qué falló.
 
 ## Comandos
 
 ```
 python tools/extraer.py sources/<archivo>             # -> extracted/<nombre>/; 1 = con pendientes
 python tools/preparar.py extracted/<nombre>           # -> documentos/<nombre>/ + pendientes
-python tools/validar.py documentos/<n>/<n>.md         # antes de generar; 0 = sin errores
-python manual.py documentos/<n>/<n>.md -o output/<n>.pdf --estricto
-python tools/comparar.py <origen> output/<n>.pdf      # código 0 = correcto, 1 = falla
-python tools/revisar.py output/<n>.pdf                # hojas para el subagente revisor-visual
+python tools/rotulos_codigo.py documentos/<n>/<n>.md --ver   # rótulos de recuadro dentro del código
+python tools/validar.py documentos/<n>/<n>.md         # estructura; 0 errores y 0 avisos
+python manual.py documentos/<n>/<n>.md -o output/<n>/<n>.pdf --estricto
+python tools/comparar.py <origen> output/<n>/<n>.pdf      # código 0 = correcto, 1 = falla
+python tools/revisar.py output/<n>/<n>.pdf                # hojas para el subagente revisor-visual
 python tools/estado.py                                # en qué está cada documento
 python -m unittest discover tests                     # pruebas (no usan sources/)
 ```
@@ -53,10 +61,10 @@ Las imágenes y la traducción van siempre a subagentes (`describir-figuras`,
 ## Guías
 
 - `docs/pipeline.md`: flujo completo, bibliotecas, skills y control de costo.
-
 - `docs/extractor.md`: cómo extraer y resolver pendientes.
 - `docs/generator.md`: cómo crear, regenerar o actualizar un documento; sintaxis.
 - `docs/auditoria.md`: errores conocidos y mejoras pendientes, con su estado.
+- `docs/registro.md`: índice de los trabajos hechos sobre temporales (regla 10).
 
 Un manual en inglés lleva `idioma: en` en la cabecera. `<origen>` de `comparar.py`: el
 original de `sources/` si es un PDF y el manual se regeneró; el `.md` de `documentos/`

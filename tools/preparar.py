@@ -40,6 +40,13 @@ LABELS = {
     "importante": "IMPORTANTE", "important": "IMPORTANTE",
     "ejercicio": "EJERCICIO", "exercise": "EJERCICIO", "actividad": "EJERCICIO",
 }
+# Rótulos que solo valen como cuadro si están en mayúsculas (`**SEGURIDAD**`): en
+# minúsculas («**Seguridad**») suelen ser un subtítulo y quedan como pendiente
+LABELS_UPPER = {"seguridad": "ADVERTENCIA", "security": "ADVERTENCIA",
+                "¿por qué?": "NOTA", "why?": "NOTA"}
+# `**NOTA** texto del cuadro` en un mismo párrafo (el rótulo, en mayúsculas)
+INLINE_LABEL = re.compile(r"\*\*([^*\n]{2,30})\*\*[ \t]+(?=\S)")
+BOLD_ONLY = re.compile(r"(?:\*\*[^*\n]+\*\*\s*)+")
 COVER_LABELS = {"curso", "autor", "autora", "versión", "version", "fecha", "institución",
                 "institucion", "course", "author", "date"}
 JUNK_TITLES = re.compile(r"^(\(?anonymous\)?|untitled|unspecified|sin t[ií]tulo|"
@@ -124,7 +131,84 @@ def table_head(b):
     return re.sub(r"[*\s]", "", b.split("\n", 1)[0]).lower()
 
 
+def bold_row(b):
+    """Un párrafo hecho solo de negritas (`**A** **B** **C**`), visto como encabezado de
+    tabla: es lo que queda del encabezado que el original repite al seguir en otra página."""
+    if not BOLD_ONLY.fullmatch(b.strip()):
+        return None
+    cells = re.findall(r"\*\*([^*\n]+)\*\*", b)
+    return "|" + "|".join(re.sub(r"\s", "", c).lower() for c in cells) + "|"
+
+
+def label_type(label):
+    """Tipo de cuadro de un rótulo (`NOTA`, `SEGURIDAD`...) o None si no se reconoce."""
+    low = label.lower()
+    if label == label.upper() and low in LABELS_UPPER:
+        return LABELS_UPPER[low]
+    word = re.match(r"[^\W\d_]+", low)
+    return LABELS.get(word.group(0)) if word else None
+
+
 # ---------------------------------------------------------------------------
+def row_cells(line):
+    return [c.strip() for c in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
+
+
+def compact_table(b):
+    """Rehace una tabla que la extracción reconstruyó con columnas y filas de más (N9):
+    casi todas las celdas vacías, el texto de una celda repartido en varias columnas y
+    su continuación en la fila siguiente. Devuelve la tabla rehecha o None si no aplica.
+
+    - Columnas reales: empiezan donde el encabezado tiene texto; las celdas que siguen
+      hasta la próxima columna con encabezado son de la misma columna.
+    - Filas reales: si la tabla trae filas vacías, son las separaciones; una fila que
+      sigue a otra sin separación y no llena todas las columnas es su continuación.
+    No se pierde texto: las celdas se unen con un espacio, en su orden."""
+    lines = b.split("\n")
+    if len(lines) < 3 or not re.fullmatch(r"\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?", lines[1].strip()):
+        return None
+    rows = [row_cells(l) for l in lines[:1] + lines[2:]]
+    ncols = max(len(r) for r in rows)
+    rows = [r + [""] * (ncols - len(r)) for r in rows]
+    empty = sum(1 for r in rows for c in r if not c)
+    starts = [i for i, c in enumerate(rows[0]) if c]
+    used = [c for c in range(ncols) if any(r[c] for r in rows)]
+    has_gaps = any(not any(r) for r in rows[1:])
+    sparse = ncols >= 4 and empty >= 0.6 * ncols * len(rows)
+    if not starts or not (sparse or has_gaps or len(used) < ncols):
+        return None
+    if sparse:
+        starts[0] = 0
+        groups = list(zip(starts, starts[1:] + [ncols]))
+    else:                       # solo sobran columnas o filas vacías: las demás quedan igual
+        groups = [(c, c + 1) for c in used]
+    fold = lambda r: [" ".join(c for c in r[a:z] if c) for a, z in groups]
+    out, new = [], True
+    for r in rows[1:]:
+        g = fold(r)
+        if not any(g):
+            new = True
+        elif new or not out or all(g) or not has_gaps:
+            out.append(g)
+            new = False
+        else:
+            out[-1] = [" ".join(x for x in pair if x) for pair in zip(out[-1], g)]
+    if len(groups) == ncols and len(out) == len(rows) - 1:
+        return None
+    md = ["| " + " | ".join(fold(rows[0])) + " |", "|" + "---|" * len(groups)]
+    return "\n".join(md + ["| " + " | ".join(g) + " |" for g in out])
+
+
+def compact_tables(blocks, done):
+    for i, b in enumerate(blocks):
+        if kind(b) == "table":
+            new = compact_table(b)
+            if new:
+                blocks[i] = new
+                done["tablas rehechas (columnas y filas vacías de más)"] += 1
+    return blocks
+
+
 def join_pages(blocks, done, pending):
     """Une lo que un cambio de página partió en dos. El marcador queda después."""
     i = 1
@@ -134,6 +218,18 @@ def join_pages(blocks, done, pending):
             continue
         a, b = blocks[i - 1], blocks[i + 1]
         ka, kb, merged = kind(a), kind(b), None
+        if ka == "marker" and kb == "code":
+            # Un recuadro de tres páginas o más: tras unir las dos primeras, el marcador
+            # quedó entre el código y su tercera parte. Se mira el bloque anterior a los
+            # marcadores seguidos.
+            p = i - 1
+            while p > 0 and kind(blocks[p]) == "marker":
+                p -= 1
+            if kind(blocks[p]) == "code":
+                blocks[p] = blocks[p][:blocks[p].rstrip().rfind("```")].rstrip("\n") + "\n" + b.split("\n", 1)[1]
+                del blocks[i + 1]
+                done["bloques de código unidos"] += 1
+                continue
         if ka == kb == "code":
             merged = a[:a.rstrip().rfind("```")].rstrip("\n") + "\n" + b.split("\n", 1)[1]
             done["bloques de código unidos"] += 1
@@ -150,6 +246,26 @@ def join_pages(blocks, done, pending):
             elif a.split("\n", 1)[0].count("|") == b.split("\n", 1)[0].count("|"):
                 pending.append(f"p.{MARKER.fullmatch(blocks[i].strip()).group(1)}: una tabla sigue a otra "
                                "con las mismas columnas tras el cambio de página; si es la misma, unirlas")
+        elif kb in ("para", "label") and i + 2 < len(blocks) and kind(blocks[i + 2]) == "table" \
+                and bold_row(b):
+            # El original repite el encabezado al seguir la tabla en otra página: llega como
+            # un párrafo de negritas y la primera fila de datos queda de encabezado.
+            rest = blocks[i + 2].split("\n")
+            first = a if ka == "table" else blocks[i - 2] if i >= 2 and kind(blocks[i - 2]) == "table" else None
+            if first and table_head(first) == bold_row(b) \
+                    and first.split("\n", 1)[0].count("|") == rest[0].count("|"):
+                whole = first + "\n" + "\n".join(rest[:1] + rest[2:])
+                done["tablas unidas"] += 1
+                if ka == "table":
+                    blocks[i - 1:i + 3] = [whole, blocks[i]]
+                else:
+                    # Entre la tabla y el cambio de página quedó un párrafo: es su última
+                    # fila, sin celdas. Se une lo demás y la fila queda a la vista.
+                    page = MARKER.fullmatch(blocks[i].strip()).group(1)
+                    pending.append(f"p.{page}: «{a[:60]}» quedó debajo de su tabla: era la última fila "
+                                   "antes del cambio de página; pasarla a celdas dentro de la tabla")
+                    blocks[i - 2:i + 3] = [whole, a, blocks[i]]
+                continue
         if merged is not None:
             blocks[i - 1:i + 2] = [merged, blocks[i]]
         i += 1
@@ -161,10 +277,18 @@ def callouts(blocks, done, pending):
     out, i, unknown = [], 0, []
     while i < len(blocks):
         b = blocks[i]
+        m = INLINE_LABEL.match(b) if kind(b) == "para" else None
+        if m and m.group(1) == m.group(1).upper() and label_type(m.group(1).strip()):
+            label = m.group(1).strip().rstrip(":")    # `**NOTA** texto` en un mismo párrafo
+            tipo = label_type(label)
+            title = "" if label.lower() == tipo.lower() else " " + label
+            out.append(f"> [!{tipo}]{title}\n> " + b[m.end():].replace("\n", "\n> "))
+            done["cuadros reconstruidos"] += 1
+            i += 1
+            continue
         if kind(b) == "label" and i + 1 < len(blocks) and kind(blocks[i + 1]) == "para":
             label = b.strip().strip("*").strip().rstrip(":")
-            word = re.match(r"[^\W\d_]+", label.lower())
-            tipo = LABELS.get(word.group(0)) if word else None
+            tipo = label_type(label)
             if tipo:
                 title = "" if label.lower() == tipo.lower() else " " + label
                 out.append(f"> [!{tipo}]{title}\n> " + blocks[i + 1].replace("\n", "\n> "))
@@ -181,6 +305,31 @@ def callouts(blocks, done, pending):
     if len(unknown) > 4:
         pending.append(f"y {len(unknown) - 4} rótulos más en negrita sola (buscar líneas `**...**`)")
     return out
+
+
+def inline_code(blocks, done):
+    """Une el código en línea que un salto de renglón del original partió en dos
+    (`dotnet` `sln` -> `dotnet sln`). Sin espacio solo si el corte cayó dentro de una
+    palabra (`SqlServe` `r` -> `SqlServer`): los dos trozos unidos forman una palabra que
+    el documento usa entera, y alguno de los trozos no existe suelto en otra parte."""
+    vocab = Counter(w for b in blocks for w in re.findall(r"[^\W\d_]+", b))
+    pair = re.compile(r"`([^`\n]+)` `([^`\n]+)`")
+
+    def join(m):
+        a, b = m.group(1), m.group(2)
+        tail, head = re.search(r"[^\W\d_]+$", a), re.match(r"[^\W\d_]+", b)
+        cut = tail and head and vocab[tail.group(0) + head.group(0)] >= 1 \
+            and (vocab[tail.group(0)] <= 1 or vocab[head.group(0)] <= 1)
+        done["código en línea unido" + (" (palabra cortada)" if cut else "")] += 1
+        return f"`{a}{'' if cut else ' '}{b}`"
+
+    for i, b in enumerate(blocks):
+        if kind(b) in ("code", "comment", "marker"):
+            continue
+        while pair.search(b):
+            b = pair.sub(join, b, count=1)
+        blocks[i] = b
+    return blocks
 
 
 def links(blocks, done, pending):
@@ -261,8 +410,10 @@ def prepare(text):
     done, pending = Counter(), []
     front, body = split_front(text)
     blocks = split_blocks(body)
+    blocks = compact_tables(blocks, done)
     blocks = join_pages(blocks, done, pending)
     blocks = callouts(blocks, done, pending)
+    blocks = inline_code(blocks, done)
     blocks = links(blocks, done, pending)
     front = cover(front, blocks, done, pending)
     blocks = chapters(front, blocks, done)

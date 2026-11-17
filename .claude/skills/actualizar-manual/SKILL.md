@@ -24,9 +24,9 @@ Documento: `documentos/$0/$0.md`. El PDF nunca se edita: se cambia el `.md` y se
 2. Hacer el cambio con `Edit` puntual. No reescribir secciones que no cambian.
 3. En la cabecera: subir `version` (1.0 → 1.1 correcciones, 2.0 cambios grandes) y
    actualizar `fecha`, o borrar la línea `fecha` para que use la de hoy.
-4. `python tools/validar.py documentos/$0/$0.md`
-5. `python manual.py documentos/$0/$0.md -o output/$0.pdf`
-6. `python tools/comparar.py documentos/$0/$0.md output/$0.pdf --estricto`
+4. `python tools/validar.py documentos/$0/$0.md`: 0 errores y 0 avisos (regla 8).
+5. `python manual.py documentos/$0/$0.md -o output/$0/$0.pdf`
+6. `python tools/comparar.py documentos/$0/$0.md output/$0/$0.pdf --estricto`
    Debe terminar en `RESULTADO: CORRECTO`.
 7. Revisión visual solo si el cambio toca tablas, figuras, código largo o la portada
    (skill `verificar-pdf`).

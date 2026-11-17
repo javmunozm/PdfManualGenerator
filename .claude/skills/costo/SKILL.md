@@ -19,8 +19,10 @@ allowed-tools:
 3. Si la traducción o las figuras superan ~40.000 tokens, preguntar antes de empezar,
    salvo que el usuario ya haya pedido el proceso completo de ese documento: entonces
    avisar el costo y seguir.
-4. Al estimar la traducción, sumar el arranque de los subagentes: unos 7.000 tokens por
-   parte, además del contenido.
+4. Al estimar la traducción, contar por parte y no solo por contenido: medido, una parte
+   de ~8.000 tokens cuesta entre 29.000 y 41.000 tokens de subagente (leerla, escribirla
+   y el arranque). Un manual de ~108.000 tokens en 13 partes: ~445.000.
+5. El costo se informa; no decide si un manual técnico se traduce (regla 2 de `CLAUDE.md`).
 
 ## Qué cuesta y qué no
 

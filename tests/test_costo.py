@@ -140,7 +140,7 @@ class EstadoYRevision(Caso):
         md = self.tmp / "documentos" / nombre / f"{nombre}.md"
         md.parent.mkdir(parents=True)
         md.write_text(cuerpo, encoding="utf-8")
-        return md, self.tmp / "output" / f"{nombre}.pdf"
+        return md, self.tmp / "output" / nombre / f"{nombre}.pdf"       # una carpeta por documento
 
     def test_estado_dice_que_falta_en_cada_documento(self):
         import os

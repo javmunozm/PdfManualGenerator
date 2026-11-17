@@ -372,6 +372,7 @@ documentación (N5, N6) no tienen una prueba con su código.
 | N6 | Bajo | Cantidad de pruebas desfasada en la documentación. | **Resuelto.** `pipeline.md` dice 99. El «41 pruebas» de la tabla 1.1 es el dato de su fecha. |
 | N7 | Bajo | `guardia.py` dejaba pasar la llamada si no podía leerla o fallaba. | **Resuelto.** Pide confirmación. Límite: si Python no está, el hook no corre; quedan las reglas `ask` y `deny` de `settings.json`. |
 | N8 | Bajo | Un documento sin títulos imprimía un índice con el texto de relleno de ReportLab. | **Resuelto.** Sin títulos no hay índice. |
+| N9 | Alto | `validar.py` da 0 errores y 0 avisos con una tabla que `manual.py` no puede dibujar. Visto el 16/11/2026 en `Manual_1_DotNet10_Vue3_SQLServer_Mediator_Mapperly` (p. 50 del original, sección 8.6): el extractor reconstruyó dos tablas de 3 y 2 columnas como tablas de 15 y 10, casi todas las celdas vacías y el texto de cada celda repartido en varias filas. `manual.py` terminó con `ValueError: … 28 rows x 15 cols … negative availWidth` de ReportLab, sin indicar la línea del `.md`. | **Resuelto (16/11/2026, sección 14):** `preparar.py` rehace sola la tabla, `validar.py` da error con su línea y `manual.py` termina con un mensaje y código 2. Queda (3), en el extractor. Historia: en ese manual se corrigió a mano: se reescribieron las dos tablas con 3 y 2 columnas, sin quitar contenido. Falta: (1) que `validar.py` dé error con la línea de la tabla cuando las columnas no caben en el ancho de la página (en esta, 15 columnas con 6 pt de margen por lado dejan menos de 0 pt por columna) y aviso cuando hay muchas columnas casi vacías; (2) que `manual.py` atrape ese error e informe la línea; (3) revisar por qué el extractor partió esas tablas en columnas de más (no se investigó). |
 
 ### 13.2 Generador
 
@@ -430,3 +431,77 @@ documentación (N5, N6) no tienen una prueba con su código.
 - La revisión visual del manual regenerado (dos hojas, 7 páginas) no dio observaciones;
   es una muestra a baja escala, no una revisión de las 157 páginas.
 - H4 (impedir el cierre con un PDF desactualizado) no se vio actuar en una sesión real.
+
+## 14. Segundo manual de la serie (Manual_2_DotNet10_React19_SQLServer_Mediator_Mapperly, 16/11/2026)
+
+176 páginas, ~112.000 tokens. Regenerado en español y comparado con el original (100%,
+código 0), traducido al inglés (180 páginas, 130 marcadores), `comparar_traduccion.py`
+correcto y `comparar.py --estricto` en código 0. Revisión visual: dos hojas y un
+acercamiento a dos páginas, sin observaciones al final.
+
+### 14.1 Lo que la conversión dejaba mal y nadie avisaba
+
+La cobertura era 100% y `validar.py` daba 0 errores con todo esto dentro. El manual 1
+(mismo diseño) se entregó con casi todos estos defectos; el manual 4, con los de código.
+
+| ID | Qué pasaba | Estado |
+|---|---|---|
+| N9 | Tabla reconstruida con 15 columnas (casi todas vacías): `manual.py` terminaba en una traza de ReportLab. | **Resuelto.** `preparar.py` la rehace (columnas donde el encabezado tiene texto; filas vacías como separación); `validar.py` da error con la línea si no cabe y aviso si casi todo está vacío; `manual.py` da mensaje y código 2; ninguna columna queda con menos ancho que su relleno. |
+| N10 | Tabla que sigue en otra página: el encabezado repetido quedaba como un párrafo de negritas y la primera fila de datos, como encabezado de una tabla nueva. A veces con una columna vacía de más y la fila partida en dos. | **Resuelto** en `preparar.py`. Si entre la tabla y el cambio de página quedó la última fila como párrafo (sin celdas), une lo demás y lo deja como pendiente: esa fila se arma a mano. |
+| N11 | 22 de 48 cuadros no se armaban: el rótulo venía en el mismo párrafo (`**NOTA** texto`), o era `SEGURIDAD` o `¿POR QUÉ?`. | **Resuelto** en `preparar.py`. Los dos últimos solo valen en mayúsculas; «**Seguridad**» sigue quedando como pendiente. |
+| N12 | Palabras que el original corta al final del renglón («cancellationTo» / «ken») contaban dos veces en `comparar.py`: los trozos como faltantes y la palabra entera como sobrante. Lo mismo cuando el corte lo hace el PDF generado, o los dos en puntos distintos. | **Resuelto.** `comparar.py` las cuenta enteras y las lista en un aviso. Solo une dos palabras seguidas que están de más en su lado y que juntas forman una que está de más en el otro. |
+| N13 | El rótulo de cada recuadro de código (`API/Program.cs`, `TERMINAL`) quedaba como primera línea del código; 86 rótulos «… archivo» de cambio de página quedaban **en medio** del código; 57 recuadros distintos quedaban pegados en un mismo bloque. Quien copia el código se lleva esas líneas. También pasa en el manual 4 (71 y 40). | **Resuelto** con `tools/rotulos_codigo.py` y el título de bloque (```` ```API/Program.cs ````) que `manual.py` dibuja en una franja. `comparar.py` no cuenta como falta el «… rótulo» que el original repite. El manual 4 no se rehízo. |
+| N14 | En una tabla con código largo, las palabras normales de las otras columnas se partían («component» / «es»). | **Resuelto** en `manual.py`: primero el ancho de la palabra más larga de cada columna; el resto se reparte de menor a mayor, así un código corto queda entero y solo el más largo se parte. |
+| N15 | Un bloque de código de tres páginas o más quedaba en dos bloques. | **Resuelto** en `preparar.py` (y `rotulos_codigo.py` une los que ya estaban preparados). |
+| N16 | Código en línea partido por el renglón: `` `dotnet` `sln` `` y, peor, `` `SqlServe` `r` ``. 50 casos. | **Resuelto** en `preparar.py`: los une; sin espacio solo si la palabra unida existe entera en el documento y algún trozo no existe suelto. |
+
+### 14.2 Pendiente en el extractor (se corrigió a mano en este manual)
+
+Son cinco, todos del mismo diseño de origen; el manual 3 los va a traer:
+
+| ID | Qué pasa | Qué hacer |
+|---|---|---|
+| E20 | Todos los títulos en `###` y los capítulos como «PARTE I · CAPÍTULO 1 Título». Si el título ocupa dos renglones, queda fundido con el párrafo (`**PARTE II · CAPÍTULO 6** **Título** texto`). El PDF tiene 130 marcadores con su nivel, pero el título de la página no coincide con el del marcador y no se usa. | En `extraer.py`, comparar cada bloque con los marcadores de **su página** por el final del texto, y tomar del marcador el nivel y el título. Mientras tanto: script sobre `documentos/` (partes y capítulos en `#`, secciones en `##`) y `--ignorar "PARTE I · CAPÍTULO"` al comparar. |
+| E21 | Las páginas de índice no se reconocen: los puntos guía vienen de a uno (`**.** **.**`) y `LEADER` no los ve. Quedan en el cuerpo, parte como tablas. | Detectar la página también por la proporción de renglones que son solo «.» o por los marcadores. |
+| E22 | 11 renglones de código cortados por el ancho de la página no se unen: la continuación trae 4 espacios más de sangría que el renglón cortado, y la regla exige que empiece en el borde. Están en la lista de dudosos del reporte, entre 93 que no son cortes. | Unir cuando el renglón siguiente no habría cabido **y** su sangría es la del anterior más un valor fijo que se repite en todo el documento. |
+| E23 | La última fila de una tabla antes del cambio de página queda fuera de la tabla, como párrafo sin celdas. Una celda angosta parte un identificador y el extractor le pone un espacio («Op enIdConnect»). | Revisar el borde inferior en `ruled_tables`; para el identificador, la misma regla de N16 dentro de las celdas. |
+| E24 | Un recuadro con texto en letra de código y dibujo de flechas (un diagrama de flujo) sale como tabla de una celda con todos los renglones en línea. | Tratarlo como bloque de código. En este manual se rehízo con las posiciones leídas del original. |
+
+### 14.3 Costo de traducir, medido
+
+- 14 partes con `--tanda 10000`. 13 fueron a `traductor` (Sonnet): ~445.000 tokens de
+  subagente en total, entre 29.000 y 41.000 por parte, y cerca de un minuto cada una
+  (tres a la vez: unos 6 minutos en total). La parte de 864 tokens se tradujo en la
+  conversación principal con reemplazos exactos.
+- Desvíos: 6 marcadores dentro de código en línea traducidos (`<proyecto>` → `<project>`),
+  todos detectados por `comparar_traduccion.py` y devueltos con un script. Tamaño 99%.
+- El glosario salió del manual 4, ya traducido, y se pasó a todas las partes desde el
+  principio: no hizo falta esperar la primera.
+- Traducir no es lo caro de este flujo: lo caro fue depurar la conversión. Dejar un manual
+  técnico en español por costo no se justifica con estos números (regla 2 de `CLAUDE.md`).
+
+### 14.4 Lo que no se verificó
+
+- **El manual 1 sigue en español** y con los defectos N10, N11, N13 y N16 y el diagrama
+  de la sección 3.1 aplanado. No se tocó: no era el encargo.
+- El manual 4 conserva N13 (rótulos dentro del código).
+- La revisión visual vio 9 páginas de 180.
+- `rotulos_codigo.py --todos` se usó porque en este manual todo bloque empieza con un
+  rótulo; un caso (dos recuadros pegados sin línea vacía entre ellos) se separó a mano.
+- La traducción no se leyó entera: se comprobó la estructura, no la calidad de cada frase.
+
+### 14.5 Verificación de la conversión y herramientas nuevas (17/11/2026)
+
+| Qué | Estado |
+|---|---|
+| Avisos de conversión de `validar.py` (`conversion()`): rótulo en la primera línea del código, «… rótulo» en medio, código en línea partido, puntos guía, fila vacía, cuadro sin armar, encabezado de tabla suelto, título fundido, todos los títulos en un nivel. Solo con `fuente:` en la cabecera. | **Resuelto**, con prueba por aviso (`AvisosDeConversion`) y otra de que un documento sin `fuente:` no recibe ninguno. |
+| Regla 8 de `CLAUDE.md`: `validar.py` con 0 errores y 0 avisos es obligatorio en **todo** documento, no solo en los extraídos (decisión del usuario). | **Resuelto** en `CLAUDE.md`, `pipeline.md`, `generator.md` y las skills `actualizar-manual` y `verificar-pdf`. |
+| E24, en parte: `extraer.py` (`diagram_like`) reconoce tres o más cajas unidas por conectores con rótulos cortos, guarda `p<N>-diagrama<M>.png` y lo lista en «## Diagramas con texto». | **Resuelto solo para cajas y flechas dibujadas**, con prueba (`Diagramas`). El recuadro con letra de código y flechas que sale como tabla de una celda **sigue pendiente**. |
+| `tools/region.py`: renglones de una franja con su columna, o recorte `.png`, sin abrir el PDF en la conversación. | **Resuelto**, con prueba de los dos modos y del código 2. No se agregó a `allowed-tools` de ninguna skill ni a los comandos de `CLAUDE.md` (decisión del usuario). |
+| `rotulos_codigo.py`: dos recuadros pegados sin línea vacía se separan si un «… X» más abajo confirma que «X» es un rótulo (el caso que en 14.4 se separó a mano). | **Resuelto**, con prueba. Tampoco va en `allowed-tools` (decisión del usuario). |
+| Coherencia: toda opción `--algo` citada en skills, subagentes, `CLAUDE.md`, `README.md`, `pipeline.md`, `extractor.md` y `generator.md` existe en su script. | **Resuelto**, con prueba (`Coherencia`). |
+| Regla 10 de `CLAUDE.md`: lo que pisaría trabajo hecho se hace en temporales que se borran al terminar; lo hecho queda en `docs/registro.md`. | **Resuelto** (decisión del usuario). |
+| Manual 4: N13 y N16 (172 rótulos al título del bloque, 30 códigos en línea unidos), títulos de bloque traducidos, dos celdas git. | **Resuelto**: validar 0/0, `comparar --estricto` código 0. |
+| Manual 1: rehecho como el manual 2 y traducido al inglés (detalle en `docs/registro.md`). | **Resuelto**: validar 0/0, `comparar --estricto` código 0. **No verificado contra el original** (permiso denegado): se comparó con `extracted/`; el diagrama 3.1 y la disposición del flujo 8.1 se tomaron del manual 2 (mismas palabras). |
+
+Pruebas al 17/11/2026: 134, todas OK.

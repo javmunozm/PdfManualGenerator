@@ -2,16 +2,16 @@
 """Arma las hojas de revisión visual de un PDF generado (ver docs/generator.md, sección 8).
 
 Uso:
-    python tools/revisar.py output/<nombre>.pdf
-    python tools/revisar.py output/<nombre>.pdf --paginas 12,40 --dpi 110
+    python tools/revisar.py output/<nombre>/<nombre>.pdf
+    python tools/revisar.py output/<nombre>/<nombre>.pdf --paginas 12,40 --dpi 110
 
 Sin --paginas crea dos imágenes, cada una con hasta 4 páginas una al lado de otra:
 
-    output/revision.png     portada, índice, primera página de contenido y última página
-    output/revision2.png    las páginas con más riesgo: la tabla más cargada, la última
+    output/<nombre>/revision.png     portada, índice, primera página de contenido y última página
+    output/<nombre>/revision2.png    las páginas con más riesgo: la tabla más cargada, la última
                             tabla, una figura y el bloque de código más largo
 
-Con --paginas crea solo output/revision.png con esas páginas (para ver de cerca una que
+Con --paginas crea solo output/<nombre>/revision.png con esas páginas (para ver de cerca una que
 el revisor marcó). Las imágenes no se abren en la conversación principal: se pasan al
 subagente revisor-visual, junto con la lista de páginas que imprime este script.
 

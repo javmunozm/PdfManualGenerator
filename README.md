@@ -30,9 +30,9 @@ pip install -r requirements.txt
 python tools/extraer.py sources/archivo.pdf          # -> extracted/archivo/
 python tools/preparar.py extracted/archivo           # -> documentos/archivo/ + pendientes
 python tools/validar.py documentos/x/x.md            # revisa el .md antes de generar
-python manual.py documentos/x/x.md -o output/x.pdf   # genera el PDF
-python tools/comparar.py sources/archivo.pdf output/x.pdf   # código 0 = correcto
-python tools/revisar.py output/x.pdf                 # hojas de revisión visual
+python manual.py documentos/x/x.md -o output/x/x.pdf   # genera el PDF
+python tools/comparar.py sources/archivo.pdf output/x/x.pdf   # código 0 = correcto
+python tools/revisar.py output/x/x.pdf                 # hojas de revisión visual
 python tools/estado.py                               # en qué está cada documento
 python -m unittest discover tests                    # pruebas del flujo
 ```
@@ -49,7 +49,9 @@ en inglés lleva `idioma: en` en la cabecera.
 | `manual.py` | Generador de PDF (no hace falta editarlo). |
 | `tools/extraer.py` | Extractor multiformato a Markdown + reporte de cobertura. |
 | `tools/preparar.py` | Pasa una extracción a `documentos/` y aplica los ajustes que no requieren criterio. |
-| `tools/validar.py` | Revisa un `.md` antes de generar: errores y sintaxis no admitida, con número de línea. |
+| `tools/validar.py` | Revisa un `.md` antes de generar: errores, sintaxis no admitida y, en un documento extraído, los defectos de conversión que la cuenta de palabras no ve; con número de línea. |
+| `tools/rotulos_codigo.py` | Saca del código los rótulos de recuadro que deja la extracción y los pasa al título del bloque. |
+| `tools/region.py` | Texto con columnas o recorte de una franja de una página de un PDF, sin abrirlo en la conversación. |
 | `tools/costo.py` | Estima los tokens de trabajar un documento y propone un plan por tandas. |
 | `tools/capitulos.py` | Parte un `.md` por capítulos y lo vuelve a unir (para traducir o trabajar por partes). |
 | `tools/comparar_traduccion.py` | Verifica una traducción por su estructura: código, cifras, tablas, enlaces, títulos. |
@@ -65,4 +67,4 @@ en inglés lleva `idioma: en` en la cabecera.
 | `sources/` | Originales (no se modifican). Local. |
 | `extracted/` | Resultados de extracción. Local. |
 | `documentos/` | Fuentes `.md` listas para generar. Local. |
-| `output/` | PDFs generados. Local. |
+| `output/` | PDFs generados, una carpeta por documento (`output/<n>/<n>.pdf`, con su registro de verificación y sus hojas de revisión). Local. |

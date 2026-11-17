@@ -292,6 +292,14 @@ def inline(text, link_color="#1F4E79", br=False):
 # ---------------------------------------------------------------------------
 # Bloque de código con fondo, que se puede dividir entre páginas
 # ---------------------------------------------------------------------------
+def code_title(fence):
+    """Título de un bloque de código: lo que sigue a ``` en la línea que lo abre
+    (```API/Program.cs, ```TERMINAL). Un nombre de lenguaje (```python, ```bash: una
+    palabra corta en minúsculas) no es un título y se ignora, como siempre."""
+    info = fence.strip().lstrip("`").strip()
+    return "" if re.fullmatch(r"[a-z][a-z0-9+#-]{0,11}", info) else info
+
+
 class CodeBlock(Flowable):
     """Recuadro de código en el que cada renglón del código ocupa un renglón.
 
@@ -300,13 +308,16 @@ class CodeBlock(Flowable):
     del renglón y una marca gris al inicio, para que se vea que es continuación.
     """
     FONT, SIZE, MIN_SIZE, PAD, GLYPH = "Courier", 8.5, 7.0, 6, 0.6   # GLYPH: ancho / tamaño
+    HEAD = 15                     # alto de la franja del título (nombre del archivo, «TERMINAL»)
 
-    def __init__(self, lines, accent, rows=None, size=None):
+    def __init__(self, lines, accent, rows=None, size=None, title=""):
         super().__init__()
         self.raw_lines = [ln.expandtabs(4) for ln in lines]
         self.accent = accent
         self.rows = rows          # [(texto, es_continuación)], ya calculado al dividir
         self.size = size
+        self.title = title        # va en una franja arriba: no es parte del código
+        self.head = self.HEAD if title else 0
 
     def _layout(self, width):
         avail = width - 2 * (self.PAD + 4)        # mismo margen interior a ambos lados
@@ -337,17 +348,18 @@ class CodeBlock(Flowable):
         if self.rows is None:
             self.size, self.rows = self._layout(availWidth)
         self.leading = round(self.size * 1.3, 2)
-        self.height = len(self.rows) * self.leading + 2 * self.PAD
+        self.height = len(self.rows) * self.leading + 2 * self.PAD + self.head
         return self.width, self.height
 
     def split(self, availWidth, availHeight):
         self.wrap(availWidth, availHeight)
-        fit = int((availHeight - 2 * self.PAD) / self.leading)
+        fit = int((availHeight - 2 * self.PAD - self.head) / self.leading)
         while 0 < fit < len(self.rows) and self.rows[fit][1]:
             fit -= 1                              # no separar un renglón de su continuación
         if fit < 3 or fit >= len(self.rows):
             return []
-        return [CodeBlock([], self.accent, self.rows[:fit], self.size),
+        # El título va solo en la primera parte: repetirlo metería texto que no está en el .md
+        return [CodeBlock([], self.accent, self.rows[:fit], self.size, self.title),
                 CodeBlock([], self.accent, self.rows[fit:], self.size)]
 
     def draw(self):
@@ -355,10 +367,22 @@ class CodeBlock(Flowable):
         c.setFillColor(colors.HexColor("#F5F5F5"))
         c.setStrokeColor(GRIS_CLARO)
         c.roundRect(0, 0, self.width, self.height, 3, fill=1, stroke=1)
+        if self.title:
+            top = self.height - self.head
+            c.setFillColor(colors.HexColor("#E4E4E4"))
+            c.roundRect(0, top, self.width, self.head, 3, fill=1, stroke=0)
+            c.rect(0, top, self.width, 3, fill=1, stroke=0)       # esquinas rectas abajo
+            c.setFillColor(colors.HexColor("#4D4D4D"))
+            x = self.PAD + 4
+            for f, t in runs(self.title):
+                font = f or "Helvetica-Bold"
+                c.setFont(font, 7.5)
+                c.drawString(x, top + 4.6, t)
+                x += stringWidth(t, font, 7.5)
         c.setFillColor(self.accent)
         c.rect(0, 0, 2.5, self.height, fill=1, stroke=0)
         x0, cw = self.PAD + 4, self.GLYPH * self.size
-        y = self.height - self.PAD - self.size
+        y = self.height - self.PAD - self.size - self.head
         c.setStrokeColor(colors.HexColor("#8C8C8C"))
         c.setLineWidth(0.7)
         for text, cont in self.rows:               # marca de continuación (dibujo, no texto)
@@ -368,7 +392,7 @@ class CodeBlock(Flowable):
                          (x, y + self.size * 0.25, x + 1.3 * cw, y + self.size * 0.25)])
             y -= self.leading
         c.setFillColor(colors.HexColor("#262626"))
-        y = self.height - self.PAD - self.size
+        y = self.height - self.PAD - self.size - self.head
         for text, _ in self.rows:
             if text.isascii():
                 c.setFont(self.FONT, self.size)
@@ -442,6 +466,20 @@ SIN_VACIO = {"titulo", "fecha", "color", "tamano", "indice", "numerar", "dpi_ima
 
 class ConfigError(Exception):
     """La cabecera tiene un valor con el que no se puede generar el PDF."""
+
+
+class TableError(Exception):
+    """Una tabla del .md no se puede dibujar (más columnas de las que caben)."""
+
+
+MIN_COL = 30          # pt: ancho mínimo útil de una columna (12 de relleno + unas letras)
+
+
+def max_table_cols(tamano="A4"):
+    """Cuántas columnas caben en una tabla a lo ancho de la página (N9). Lo usan el
+    generador y tools/validar.py, para que el validador rechace lo que no se dibuja."""
+    width = (LETTER if str(tamano).lower() in ("carta", "letter") else A4)[0]
+    return int((width - 5 * cm - 12) // MIN_COL)
 
 
 def check_config(cfg):
@@ -571,7 +609,7 @@ class Builder:
         reparte en proporción a ellas.
         """
         ncols, size, pad = len(cells[0]), self.s["cell"].fontSize, 14
-        need, want = [0.0] * ncols, [0.0] * ncols
+        need, want, words = [0.0] * ncols, [0.0] * ncols, [0.0] * ncols
         for row in cells:
             for c, cell in enumerate(row):
                 for part in re.split(r"<br\s*/?>", cell, flags=re.I):
@@ -583,13 +621,40 @@ class Builder:
                             piece = piece.replace("*", "").replace("\\|", "|")
                         for word in piece.split():
                             need[c] = max(need[c], stringWidth(word, font, size))
+                            if not i % 2:
+                                words[c] = max(words[c], stringWidth(word, font, size))
                         line += stringWidth(piece, font, size)
                     want[c] = max(want[c], line)
         cap = 0.6 * self.fw if ncols > 1 else self.fw
         need = [min(n + pad, cap) for n in need]
         want = [max(min(w + pad, cap), n) for w, n in zip(want, need)]
         if sum(need) >= self.fw:
-            return [self.fw * n / sum(need) for n in need]
+            # No cabe todo. Antes de repartir en proporción (que parte palabras normales:
+            # «component-es»), se deja a cada columna el ancho de su palabra más larga y
+            # lo que falta lo ceden las columnas con código largo, que sí se puede partir.
+            words = [max(MIN_COL, min(w + pad, n)) for w, n in zip(words, need)]
+            extra = [n - w for n, w in zip(need, words)]
+            if sum(words) < self.fw and sum(extra) > 0:
+                # Lo que queda se reparte de menor a mayor: un código corto
+                # (`ValidationBehavior`) recibe todo lo que pide y queda entero; solo las
+                # columnas con el código más largo se quedan cortas y lo parten.
+                widths, left = list(words), self.fw - sum(words)
+                order = sorted(range(ncols), key=lambda c: extra[c])
+                for pos, c in enumerate(order):
+                    give = min(extra[c], left / (ncols - pos))
+                    widths[c] += give
+                    left -= give
+                return widths
+            # Ninguna columna baja de MIN_COL: una columna vacía entre otras muy anchas
+            # quedaba con menos ancho que su relleno y ReportLab no la podía dibujar (N9)
+            widths = [self.fw * n / sum(need) for n in need]
+            low = [i for i, w in enumerate(widths) if w < MIN_COL]
+            if low:
+                deficit = sum(MIN_COL - widths[i] for i in low)
+                spare = sum(w - MIN_COL for w in widths if w >= MIN_COL)
+                widths = [MIN_COL if w < MIN_COL else w - deficit * (w - MIN_COL) / spare
+                          for w in widths]
+            return widths
         if sum(want) <= self.fw:
             return [self.fw * w / sum(want) for w in want]
         spare, flex = self.fw - sum(need), [w - n for w, n in zip(want, need)]
@@ -601,6 +666,11 @@ class Builder:
         if not cells:
             return
         ncols = max(len(r) for r in cells)
+        if ncols * MIN_COL > self.fw:
+            # ReportLab fallaría con «negative availWidth» y sin decir dónde (N9)
+            raise TableError(f"l.{self.line}: la tabla tiene {ncols} columnas y en la página caben "
+                             f"{int(self.fw // MIN_COL)}. Si viene de una extracción, es una tabla "
+                             "mal reconstruida (celdas vacías de más): rehacerla con sus columnas reales")
         cells = [r + [""] * (ncols - len(r)) for r in cells]
         data = [[self.para(c, self.s["cell_head"], "#FFFFFF", br=True) for c in cells[0]]]
         data += [[self.para(c, self.s["cell"], br=True) for c in r] for r in cells[1:]]
@@ -752,8 +822,9 @@ class Builder:
                     code.append(lines[i]); i += 1
                 if i >= len(lines):
                     self.warn("bloque de código sin cerrar: el resto del documento salió como código")
-                self.glyphs("".join(code))
-                self.story += [CodeBlock(code or [""], self.primary), Spacer(1, 10)]
+                title = code_title(st)
+                self.glyphs("".join(code) + title)
+                self.story += [CodeBlock(code or [""], self.primary, title=title), Spacer(1, 10)]
                 i += 1; continue
 
             if st in ("\\newpage", "\\salto", "<!-- salto -->"):
@@ -1079,7 +1150,7 @@ def main():
     out = Path(args.salida) if args.salida else src.with_suffix(".pdf")
     try:
         build_pdf(src, out)
-    except ConfigError as e:
+    except (ConfigError, TableError) as e:
         print(f"No se generó: {e}", file=sys.stderr)
         return 2
     except LayoutError as e:

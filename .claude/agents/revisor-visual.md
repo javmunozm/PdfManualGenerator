@@ -1,6 +1,6 @@
 ---
 name: revisor-visual
-description: Revisa la imagen de control de un PDF generado (output/revision.png) y devuelve una lista corta de problemas visuales. Recibe una o dos rutas de imagen.
+description: Revisa la imagen de control de un PDF generado (output/<nombre>/revision.png) y devuelve una lista corta de problemas visuales. Recibe una o dos rutas de imagen.
 tools: Read
 model: haiku
 effort: low
@@ -13,8 +13,12 @@ baja escala. Ábrelas con Read y busca solo problemas que se ven:
 - Índice: entradas sin número de página; títulos que no parecen títulos.
 - Encabezado y pie: textos superpuestos; falta "Página X de Y" ("Page X of Y" si el
   manual está en inglés; el índice se titula entonces "Contents").
-- Tablas: columnas ilegibles por angostas; texto cortado.
-- Recuadros de código: renglones que se salen del recuadro.
+- Tablas: columnas ilegibles por angostas; texto cortado; palabras normales partidas por
+  la mitad; una fila suelta con la primera celda vacía (continúa la fila anterior).
+- Recuadros de código: renglones que se salen del recuadro. La franja gris de arriba, con
+  un nombre de archivo o «TERMINAL» en negrita, es el título del recuadro: es correcta si
+  no se monta sobre la primera línea del código. Un recuadro que sigue de la página
+  anterior no lleva franja.
 - Figuras: faltan, están deformadas o dicen "Imagen no encontrada" o "FIGURA: describir".
 - Cuadrados negros (■) en lugar de letras; asteriscos, `#` o `<br>` impresos tal cual.
 - Páginas casi vacías sin motivo; un título solo al final de una página.

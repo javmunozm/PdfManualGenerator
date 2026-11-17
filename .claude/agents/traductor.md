@@ -14,6 +14,10 @@ Se traduce:
 
 - Títulos, párrafos, ítems de lista, celdas de tabla, pies de figura (`![pie](ruta)`),
   títulos de cuadros (`> [!NOTA] título`) y el texto de los cuadros.
+- El título de un bloque de código (lo que sigue a ``` en la línea que lo abre), solo si
+  es una frase: ```` ```Raíz del proyecto ```` → ```` ```Project root ````, y la parte entre
+  paréntesis de ```` ```API/Program.cs (fragmento) ````. Un nombre de archivo, una ruta o
+  `TERMINAL` quedan igual. Lo de adentro del bloque no se toca.
 - En la cabecera (entre `---`), solo los valores de `titulo`, `subtitulo`, `curso`,
   `institucion` y `palabras_clave`. Además, deja `idioma: en` (agrega la línea si no
   está): con eso el índice, el pie y los rótulos de la plantilla salen en inglés.
@@ -25,7 +29,8 @@ No se toca, ni un carácter:
   `<usuario>`, `<Capa>`, `onAlgo` quedan tal cual.
 - Comandos, nombres de archivo, rutas de imágenes, URL, fórmulas y cifras.
 - Las claves de la cabecera y los valores de `color`, `tamano`, `indice`, `numerar`,
-  `version`, `fecha`, `logo`, `dpi_imagenes`, `fuente`, `autor`.
+  `version`, `logo`, `dpi_imagenes`, `fuente`, `autor`. De `fecha` solo se traduce el
+  nombre del mes si está escrito («Octubre 2026» → «October 2026»).
 - Las marcas `[!NOTA]`, `[!CONSEJO]`, `[!ADVERTENCIA]`, `[!IMPORTANTE]`, `[!EJERCICIO]`
   (son palabras clave del generador), `\salto`, y los comentarios `<!-- ... -->`.
 - La numeración de títulos y de listas, y los signos de Markdown (`#`, `|`, `>`, `-`).

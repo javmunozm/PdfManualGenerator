@@ -159,15 +159,25 @@ class Checker:
                 self.image(m.group(1), m.group(2), n)
                 i += 1
             elif st.startswith("|"):
-                widths = set()
+                widths, total, empty = set(), 0, 0
                 while i < len(lines) and lines[i].strip().startswith("|"):
                     cells = manual.split_row(lines[i])
                     if not all(re.fullmatch(r":?-{2,}:?", c) for c in cells):
                         widths.add(len(cells))
+                        total += len(cells)
+                        empty += sum(1 for c in cells if not c.strip())
                         self.inline(lines[i], i + 1, in_table=True)
                     i += 1
                 if len(widths) > 1:
                     self.aviso(n, "tabla con filas de distinta cantidad de celdas")
+                caben = manual.max_table_cols(cfg.get("tamano", "A4"))
+                if widths and max(widths) > caben:
+                    self.error(n, f"tabla de {max(widths)} columnas: en la página caben {caben} y "
+                                  "manual.py no la puede dibujar. Si viene de una extracción, es una "
+                                  "tabla mal reconstruida: rehacerla con sus columnas reales")
+                elif widths and max(widths) >= 4 and empty > 0.6 * total:
+                    self.aviso(n, f"tabla con {round(100 * empty / total)}% de celdas vacías: "
+                                  "probablemente la extracción la partió en columnas o filas de más")
             elif st.startswith(">"):
                 first = re.sub(r"^\s*>\s?", "", line).strip()
                 m = re.match(r"\[!(\w+)\]", first)
@@ -198,6 +208,84 @@ class Checker:
             chars = " ".join(f"{c} (l.{n})" for c, n in list(self.no_glyph.items())[:12])
             self.error(min(self.no_glyph.values()),
                        f"caracteres sin glifo en las fuentes del PDF (saldrían como ■): {chars}")
+        if "fuente" in cfg:                       # el documento viene de una extracción
+            self.conversion(lines, start)
+
+    # ------------------------------------------------------------------
+    CODE_LABEL = re.compile(r"[\w.\-/\[\]{}@]*[\w\]}]\.[A-Za-z]{1,6}(?: \(.*\))?"      # un archivo
+                            r"|[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ0-9 ·().]+")                       # TERMINAL
+    SPLIT_CODE = re.compile(r"`[^`\n]+` `[^`\n]+`")
+    LEADERS = re.compile(r"(?:\s\.){8,}|(?:\*\*\.\*\*\s*){5,}")
+    BOLD_ROW = re.compile(r"(?:\*\*[^*\n]+\*\*\s*){2,}")
+
+    def conversion(self, lines, start):
+        """Defectos que deja una extracción y que no cambian la cuenta de palabras: la
+        cobertura da 100% y `comparar.py` da correcto con todos ellos dentro. Solo se
+        revisan en un documento que viene de `extraer.py` (cabecera con `fuente:`).
+        Son avisos: ninguno impide generar, pero el manual no está bien convertido."""
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from preparar import label_type
+        except ImportError:                       # sin preparar.py no se revisan los cuadros
+            label_type = lambda _label: None      # noqa: E731
+        levels, first_head, i = {}, 0, start
+        while i < len(lines):
+            st, n = lines[i].strip(), i + 1
+            if st.startswith("```"):
+                j = i + 1
+                while j < len(lines) and not lines[j].strip().startswith("```"):
+                    j += 1
+                body = lines[i + 1:j]
+                cont = next((k for k, b in enumerate(body) if re.match(r"…\s*\S", b)), None)
+                if cont is not None:
+                    self.aviso(i + 2 + cont, "«… rótulo» en medio del código: es el rótulo que el original "
+                                             "repite cuando el recuadro sigue en otra página "
+                                             "(tools/rotulos_codigo.py)")
+                if st == "```" and len(body) > 2 and body[1] == "" and self.CODE_LABEL.fullmatch(body[0]):
+                    self.aviso(i + 2, f"la primera línea del bloque («{body[0][:40]}») es el rótulo del "
+                                      "recuadro, no código (tools/rotulos_codigo.py)")
+                i = j + 1
+                continue
+            if st.startswith("<!--"):
+                while i < len(lines) and "-->" not in lines[i]:
+                    i += 1
+                i += 1
+                continue
+            head = re.match(r"(#+)\s", st)
+            if head:
+                levels[len(head.group(1))] = levels.get(len(head.group(1)), 0) + 1
+                first_head = first_head or n
+            elif st:
+                if self.SPLIT_CODE.search(st):
+                    self.aviso(n, "código en línea partido en dos por el renglón del original "
+                                  "(`a` `b`): unirlo (lo hace preparar.py)")
+                if self.LEADERS.search(st):
+                    self.aviso(n, "renglón con puntos guía: es el índice del original dentro del "
+                                  "cuerpo; pasarlo a un comentario (el índice se genera solo)")
+                elif st.startswith("|"):
+                    cells = manual.split_row(st)
+                    if cells and not any(c.strip() for c in cells):
+                        self.aviso(n, "fila de tabla vacía: la extracción partió una fila en varias")
+                elif not st.startswith((">", "- ", "!")):
+                    nxt = next((l.strip() for l in lines[i + 1:i + 6]
+                                if l.strip() and not l.strip().startswith("<!--")), "")
+                    label = re.match(r"\*\*([^*\n]{2,30})\*\*(?:[ \t]+\S|$)", st)
+                    if label and label.group(1) == label.group(1).upper() \
+                            and label_type(label.group(1).strip().rstrip(":")):
+                        self.aviso(n, f"«{label.group(1)}» es el rótulo de un cuadro sin armar: "
+                                      "escribirlo como `> [!TIPO]` (lo hace preparar.py)")
+                    elif self.BOLD_ROW.fullmatch(st) and nxt.startswith("|"):
+                        self.aviso(n, "encabezado de tabla suelto: la tabla sigue de la página "
+                                      "anterior y repite su encabezado; unir las dos partes")
+                    elif re.match(r"\*\*[^*a-zñáéíóú]{6,}\*\* \*\*[^*\n]+\*\*", st):
+                        self.aviso(n, "parece un título fundido con su párrafo "
+                                      "(antetítulo en mayúsculas y título, en negrita)")
+            i += 1
+        if sum(levels.values()) >= 10 and len(levels) == 1:
+            level = next(iter(levels))
+            self.aviso(first_head, f"los {levels[level]} títulos están en un mismo nivel ({'#' * level}): "
+                                   "revisar la jerarquía contra los marcadores del original "
+                                   "(capítulos en #, secciones en ##)")
 
 
 def main():

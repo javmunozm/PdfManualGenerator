@@ -17,13 +17,17 @@ extracted/<n>/      <n>.md + assets/ + reporte.md + fuente.json     registro fie
    |  tools/costo.py            cuánto cuesta lo que sigue
    |  tools/preparar.py         ajustes sin criterio + lista de pendientes
 documentos/<n>/     <n>.md + assets/                                 la fuente del PDF
+   |  tools/validar.py          ESTRUCTURA: 0 errores y 0 avisos (lo que la cobertura no ve)
+   |  tools/rotulos_codigo.py   rótulos de recuadro fuera del código (título del bloque)
+   |  tools/region.py           una franja del original, para rehacer un diagrama aplanado
+   |  manual.py + comparar.py   PDF en español contra el original (antes de traducir)
    |  (manuales técnicos) tools/capitulos.py + subagente traductor + tools/comparar_traduccion.py
-   |  tools/validar.py          errores y sintaxis no admitida, antes de generar
+   |  tools/validar.py          otra vez: 0 errores y 0 avisos
    |  manual.py
-output/<n>.pdf      resultado
+output/<n>/         <n>.pdf + .comparar.json + revision.png          resultado, una carpeta por documento
    |  tools/comparar.py         faltantes, cifras, portada, sobrantes, orden
    |  subagente revisor-visual  una imagen de control
-terminado           comparar.py con código 0
+terminado           validar.py con 0 errores y 0 avisos y comparar.py con código 0 (regla 8)
 ```
 
 Tres casos: **A** documento nuevo, sin archivo en `sources/` (el contenido se investiga en la
@@ -41,12 +45,14 @@ validar, generar, comparar).
 | 2 | Estimar | `python tools/costo.py <n>` | un `.md` | tamaño, pendientes, plan por tandas | 0 |
 | 3 | Resolver pendientes | subagente `describir-figuras` + ediciones | `reporte.md`, `assets/` | `.md` sin `FIGURA: describir` ni `TRANSCRIBIR` | — |
 | 4 | Preparar | `python tools/preparar.py extracted/<n>` | `extracted/<n>/` | `documentos/<n>/` | 0 listo · 1 quedan pendientes · 2 ya existe o error |
+| 4b | Rótulos de código | `python tools/rotulos_codigo.py documentos/<n>/<n>.md [--ver] [--todos]` | `.md` con el rótulo de cada recuadro (`API/Program.cs`, `TERMINAL`) como primera línea del código | el rótulo en la línea que abre el bloque (```API/Program.cs), sin los «… rótulo» de cambio de página y con cada recuadro en su bloque | 0 · 2 error |
 | 5 | Traducir (manuales técnicos) | `python tools/capitulos.py partir\|unir ...` + subagente `traductor` | `.md` en español | `.md` en inglés + `<n>.anterior.md` | 0 · 2 error |
 | 6 | Verificar la traducción | `python tools/comparar_traduccion.py <n>.anterior.md <n>.md` | los dos `.md` | diferencias de estructura | 0 coincide · 1 difiere |
-| 7 | Validar | `python tools/validar.py documentos/<n>/<n>.md` | `.md` | errores y avisos con línea | 0 sin errores · 1 con errores |
-| 8 | Generar | `python manual.py documentos/<n>/<n>.md -o output/<n>.pdf [--estricto]` | `.md` | PDF | 0 · 1 generado con avisos (solo con `--estricto`) · 2 no se generó |
-| 9 | Comparar | `python tools/comparar.py <origen> output/<n>.pdf` | origen (`.md` o PDF) y PDF | resultado, y su registro en `output/.comparar.json` | 0 correcto · 1 falla · 2 error |
-| 10 | Revisión visual | `python tools/revisar.py output/<n>.pdf` + subagente `revisor-visual` | PDF | `output/revision.png`, `output/revision2.png` y observaciones | 0 · 2 error |
+| 7 | Validar | `python tools/validar.py documentos/<n>/<n>.md [--max 400]` | `.md` | errores y avisos con línea. En un documento extraído (cabecera con `fuente:`), además los defectos de conversión: rótulos dentro del código, código en línea partido, cuadros sin armar, tablas partidas o que no caben, títulos en un solo nivel, índice en el cuerpo. Se pasa **dos veces**: después de preparar (etapa 4) y después de traducir | 0 sin errores · 1 con errores |
+| 7b | Mirar una franja del original | `python tools/region.py <pdf> <página> texto\|imagen "<desde>" "<hasta>" [salida.png]` | una página del PDF y dos textos que delimitan la franja | renglones con su columna, o un recorte `.png` para `describir-figuras` | 0 · 2 no encontró los textos |
+| 8 | Generar | `python manual.py documentos/<n>/<n>.md -o output/<n>/<n>.pdf [--estricto]` | `.md` | PDF | 0 · 1 generado con avisos (solo con `--estricto`) · 2 no se generó |
+| 9 | Comparar | `python tools/comparar.py <origen> output/<n>/<n>.pdf` | origen (`.md` o PDF) y PDF | resultado, y su registro en `output/<n>/.comparar.json` | 0 correcto · 1 falla · 2 error |
+| 10 | Revisión visual | `python tools/revisar.py output/<n>/<n>.pdf` + subagente `revisor-visual` | PDF | `output/<n>/revision.png`, `output/<n>/revision2.png` y observaciones | 0 · 2 error |
 | — | Estado | `python tools/estado.py` | `extracted/`, `documentos/`, `output/` | una línea por documento con algo pendiente | 0 |
 
 Origen para la etapa 9. El contenido sale de `sources/` (regla 9 de `CLAUDE.md`):
@@ -69,8 +75,8 @@ rótulos) y, con un `.md` de origen, los títulos, las figuras y los enlaces.
 ## 3. Bibliotecas instaladas
 
 Python 3.14.10 en Windows 11. Versiones instaladas al 12/11/2026, tras reinstalar el
-sistema (`pip install -r requirements.txt` instala las seis primeras; las 105 pruebas
-pasan con estas versiones al 15/11/2026):
+sistema (`pip install -r requirements.txt` instala las seis primeras; las pruebas
+pasan con estas versiones: `python -m unittest discover tests`):
 
 | Biblioteca | Instalada | Mínima (`requirements.txt`) | La usa | Para qué |
 |---|---|---|---|---|
@@ -117,9 +123,14 @@ un resumen de pocas líneas:
 
 | Subagente | Modelo | Herramientas | Tarea |
 |---|---|---|---|
-| `describir-figuras` | `sonnet` | Read, Edit, Grep | Describir figuras, pasar gráficos a tablas, transcribir páginas escaneadas. |
-| `traductor` | `sonnet` | Read, Write | Traducir una parte del manual (un archivo de `partes/`). |
-| `revisor-visual` | `haiku` | Read | Mirar la imagen de control y listar problemas visuales. |
+| `describir-figuras` | `sonnet` | Read, Edit, Grep | Describir figuras, pasar gráficos a tablas, transcribir páginas escaneadas, y pasar un diagrama de cajas y flechas a tabla de componentes y tabla de conexiones. Trabaja sobre el `.md` de `extracted/` o el de `documentos/`. |
+| `traductor` | `sonnet` | Read, Write | Traducir una parte del manual (un archivo de `partes/`), incluido el título de un bloque de código cuando es una frase. |
+| `revisor-visual` | `haiku` | Read | Mirar la imagen de control y listar problemas visuales (a 58 dpi; de cerca con `revisar.py --paginas N --dpi 110`). |
+
+Ningún subagente decide si un documento está bien convertido: eso lo dicen `validar.py`
+(estructura) y `comparar.py` (palabras), con su código de salida. El modelo de la
+conversación principal no lee el manual (por costo), así que un defecto que ninguna
+herramienta informa no lo ve ningún modelo: ver `docs/auditoria.md`, sección 15.
 
 ---
 
@@ -135,7 +146,7 @@ nunca pase por la conversación principal.
 | Describir figuras y transcribir escaneados | Caro por imagen. | Subagente `describir-figuras`: otro modelo, y las imágenes no quedan en la conversación. |
 | Leer el `.md` completo | Su tamaño, en cada turno que siga. | `tools/costo.py` da el mapa; se lee por rangos de líneas (`grep -n "^#"`). |
 | Traducir | El documento entero como salida, que es lo más caro por token. | `capitulos.py` lo parte; cada parte la traduce un `traductor` y se escribe con `Write` (sin repetir el texto viejo); la verificación la hace un script. |
-| Arranque de cada subagente | Unos 7.000 tokens por lanzamiento, tenga la parte 40 tokens o 7.000. En un manual de 87.000 tokens fueron 29 lanzamientos y ~473.000 tokens: cerca del 40% fue arranque. | `capitulos.py` junta los capítulos chicos seguidos en una parte, hasta llenar la tanda; `--tanda 10000` para la mitad de las partes. |
+| Arranque de cada subagente | Medido en el manual 2: entre 29.000 y 41.000 tokens por parte traducida, tenga la parte 900 tokens o 10.000 (`docs/auditoria.md`, 14.3). En un manual de 87.000 tokens partido en partes chicas fueron 29 lanzamientos y ~473.000 tokens. | `capitulos.py` junta los capítulos chicos seguidos en una parte, hasta llenar la tanda; `--tanda 10000` para la mitad de las partes. Las partes de menos de ~1.000 tokens se traducen en la conversación principal. |
 | Explorar carpetas al empezar | Varias llamadas para saber en qué está cada documento. | El hook de inicio agrega el resumen de `tools/estado.py`. |
 | Avisos de los subagentes en segundo plano | Cada subagente despierta dos veces a la conversación principal, con todo el historial. | No resumir en cada aviso: solo lanzar la parte siguiente. Modelo intermedio en la conversación principal (auditoría, 12.3). |
 | Reescribir el `.md` para un cambio | Todo el documento como salida. | `Edit` puntual; si el cambio se repite muchas veces, un script en archivo. |

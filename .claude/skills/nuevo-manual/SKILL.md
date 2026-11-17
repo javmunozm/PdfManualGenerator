@@ -42,14 +42,15 @@ Nombre de carpeta y archivo: primer argumento (`$0`), sin espacios ni tildes.
 5. Si parte de la información viene de archivos, se extrae primero (`/extraer`) y se copia
    desde `extracted/`, nunca desde el original. Lo que dice el archivo manda sobre la web.
 6. `python tools/validar.py documentos/$0/$0.md --estricto` hasta que no muestre nada.
-7. `python manual.py documentos/$0/$0.md -o output/$0.pdf`
-8. `python tools/comparar.py documentos/$0/$0.md output/$0.pdf --estricto`
+7. `python manual.py documentos/$0/$0.md -o output/$0/$0.pdf`
+8. `python tools/comparar.py documentos/$0/$0.md output/$0/$0.pdf --estricto`
 9. Skill `verificar-pdf` para la revisión visual.
 
 ## Sintaxis admitida
 
 `#` `##` `###`, `**negrita**`, `*cursiva*`, `` `código` ``, `[texto](https://...)`, listas
-(anidadas con 2 espacios o más de sangría), tablas, bloques de código,
+(anidadas con 2 espacios o más de sangría), tablas (`<br>` para un salto dentro de una
+celda), bloques de código (con título: ```` ```API/Program.cs ````),
 `> [!NOTA|CONSEJO|ADVERTENCIA|IMPORTANTE|EJERCICIO] título`, `![pie](ruta)` sola en la
 línea, `\salto`. Sin HTML ni notas al pie.
 Detalle: `docs/generator.md`, sección 7.

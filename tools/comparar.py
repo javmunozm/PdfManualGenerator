@@ -82,6 +82,8 @@ def md_lines(text):
         st, where = lines[i].strip(), f"l.{i + 1}"
         quote = st.startswith(">")
         if st.startswith("```"):                         # código: se imprime tal cual
+            if manual.code_title(st):                    # y su título, en la franja de arriba
+                out.append((manual.code_title(st), where))
             i += 1
             while i < len(lines) and not lines[i].strip().startswith("```"):
                 out.append((lines[i], f"l.{i + 1}"))
@@ -420,6 +422,70 @@ def drop_phrases(toks, locs, phrases):
     return toks, locs
 
 
+def drop_continuation_labels(lines):
+    """Quita del origen los rótulos que repite un recuadro de código al seguir en otra
+    página («… API/Program.cs»): son del diseño del original, no contenido, y el documento
+    generado no los lleva (tools/rotulos_codigo.py). Solo se quita el renglón que empieza
+    con «…» y repite, entero, un renglón anterior."""
+    seen, out = set(), []
+    for text, where in lines:
+        st = text.strip()
+        if st.startswith("…") and st.lstrip("… ").strip() in seen:
+            continue
+        seen.add(st)
+        out.append((text, where))
+    return out
+
+
+def rejoin_cut_words(src_t, src_l, out_t, credit=None):
+    """Palabras cortadas al final de un renglón: un PDF parte un identificador largo donde
+    se le acaba el ancho («cancellationTo» / «ken»), y cada PDF lo parte en otro sitio.
+    Sin esto cada una cuenta dos veces: sus trozos como faltantes en un lado y la palabra
+    entera (o trozos distintos) como sobrante en el otro.
+
+    Solo se unen dos palabras seguidas de un lado cuando las dos están de más en ese lado
+    y, unidas, forman una palabra que está de más en el otro: entera (pasos 1 y 2) o
+    cortada en otro punto (paso 3). `credit` son las palabras de la portada generada.
+    Devuelve (palabras del origen, ubicaciones, palabras del generado, uniones)."""
+    credit, log = credit or Counter(), []
+
+    def excess():                                 # (de más en el origen, de más en el generado)
+        have, want = Counter(out_t) + credit, Counter(src_t)
+        return want - have, have - want
+
+    def cut_pairs(toks, own):                     # palabras que salen de unir dos trozos
+        return Counter(a + b for a, b in zip(toks, toks[1:]) if own[a] > 0 and own[b] > 0)
+
+    def join(toks, locs, own, allowed):
+        own, allowed = Counter(own), Counter(allowed)
+        res_t, res_l, i = [], [], 0
+        while i < len(toks):
+            a = toks[i]
+            b = toks[i + 1] if i + 1 < len(toks) else None
+            res_l.append(locs[i])
+            if b and own[a] > 0 and own[b] > 0 and allowed[a + b] > 0:
+                allowed[a + b] -= 1
+                own[a] -= 1
+                own[b] -= 1
+                res_t.append(a + b)
+                log.append(f"{a}|{b}")
+                i += 2
+            else:
+                res_t.append(a)
+                i += 1
+        return res_t, res_l
+
+    short, spare = excess()                       # 1. cortada en el origen, entera en el generado
+    src_t, src_l = join(src_t, src_l, short, spare)
+    short, spare = excess()                       # 2. cortada en el generado, entera en el origen
+    out_t, _ = join(out_t, out_t, spare, short)
+    short, spare = excess()                       # 3. cortada en los dos, en puntos distintos
+    both = cut_pairs(src_t, short) & cut_pairs(out_t, spare)
+    src_t, src_l = join(src_t, src_l, short, both)
+    out_t, _ = join(out_t, out_t, spare, both)
+    return src_t, src_l, out_t, log
+
+
 # ---------------------------------------------------------------------------
 def context(toks, i, span=3):
     return "«…" + " ".join(toks[max(0, i - span): i + span + 1]) + "…»"
@@ -505,6 +571,7 @@ def main():
     if kind == ".pdf":
         src_doc = pymupdf.open(src_path)
         src_body, src_cover, src_aux, _ = pdf_lines(src_doc, skip)
+        src_body = drop_continuation_labels(src_body)
         if chrome["generated"]:
             template = check_template(out_doc, chrome)
     else:
@@ -531,6 +598,9 @@ def main():
         out_t, out_l = drop_repeated_headers(out_t, out_l, repeated_at_page_start(out_body), src_t)
     cover_rows = [tokens(line) for line in out_cover]
     cover_t = Counter(t for row in cover_rows for t in row)
+    # Un PDF corta los identificadores largos al final del renglón (el origen, el generado
+    # o los dos, cada uno donde se le acaba el ancho): se cuentan enteros
+    src_t, src_l, out_t, cut_words = rejoin_cut_words(src_t, src_l, out_t, cover_t)
     missing, numbers, extra, order = compare(src_t, src_l, out_t, cover_t, cover_rows)
 
     # Portada: datos de la cabecera del .md, o texto de la portada original
@@ -576,6 +646,9 @@ def main():
         print("Estructura: " + line)
     for line in struct_notes:
         print("Aviso: " + line)
+    if cut_words:
+        print(f"Aviso: {len(cut_words)} palabras cortadas al final de un renglón en uno de los "
+              f"dos PDF se contaron enteras: " + " ".join(cut_words[:a.max]))
     n_extra = sum(extra.values())
     if n_extra:
         print(f"Aviso: sobran {n_extra} palabras que no están en el origen: "

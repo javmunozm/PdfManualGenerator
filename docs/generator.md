@@ -23,11 +23,11 @@ siempre en el `.md` y se vuelve a generar. Nunca se edita el PDF.
 ```
 documentos/<nombre>/<nombre>.md     fuente lista para generar (se edita aquí)
 documentos/<nombre>/imagenes/       imágenes que usa ese documento
-output/<nombre>.pdf                 resultado
+output/<nombre>/<nombre>.pdf                 resultado
 ```
 
 ```
-python manual.py documentos/<nombre>/<nombre>.md -o output/<nombre>.pdf
+python manual.py documentos/<nombre>/<nombre>.md -o output/<nombre>/<nombre>.pdf
 ```
 
 La terminal muestra la ruta y el peso del PDF, y un «Aviso l.N» por cada cosa que se
@@ -35,7 +35,8 @@ imprimió tal cual o no se imprimió (imagen que no existe, bloque de código si
 texto después de `-->`, carácter sin glifo). En la portada, un título o subtítulo largo
 se imprime con letra más chica (hasta la mitad) para que quepa en la banda; si ni así
 cabe, se recorta con «…» y hay un «Aviso portada». Con `--estricto` esos avisos terminan en
-código 1. Código 2: no se generó (cabecera inválida, archivo inexistente). Crea la carpeta
+código 1. Código 2: no se generó (cabecera inválida, archivo inexistente, o una tabla con
+más columnas de las que caben: el mensaje dice la línea). Crea la carpeta
 de salida si no existe. Requisitos: `pip install -r requirements.txt` y la carpeta `fonts/`.
 
 ---
@@ -63,7 +64,8 @@ Después:
    Cada capítulo empieza en página nueva, así que conviene que tengan un tamaño parecido.
 4. Si la información viene de archivos, **extraerla primero** con
    [extractor.md](extractor.md) y copiar desde `extracted/`, no desde el original.
-5. Escribir el archivo completo de una sola vez (no por partes) y generar.
+5. Un documento corto se escribe de una vez; uno largo, por capítulos (uno por mensaje:
+   si una respuesta larga se corta, se pierde todo). Después, generar.
 6. Verificar (sección 7).
 
 ---
@@ -91,6 +93,11 @@ pendientes (código 1) o sin pendientes (código 0):
 | En el `.md` extraído | Quién lo ajusta |
 |---|---|
 | Párrafo, lista, bloque de código o tabla partidos por `<!-- p.N -->` | **Automático.** Los une; el marcador queda después. Una tabla solo se une si repite el mismo encabezado; si no, queda como pendiente. |
+| Tabla que sigue en otra página con el encabezado repetido como párrafo de negritas (`**A** **B**`) | **Automático.** Une las dos partes. Si la última fila antes del cambio de página quedó como párrafo debajo de la tabla, queda como pendiente: pasarla a celdas. |
+| Tabla con columnas y filas vacías de más (el texto de una celda repartido en varias) | **Automático.** La rehace: una columna por cada encabezado con texto; las filas vacías separan las filas reales. |
+| `**NOTA** texto` en un mismo párrafo; `**SEGURIDAD**`, `**¿POR QUÉ?**` (en mayúsculas) | **Automático.** Cuadro `> [!NOTA]`, `> [!ADVERTENCIA] SEGURIDAD`, `> [!NOTA] ¿POR QUÉ?`. |
+| Código en línea partido por el renglón (`` `dotnet` `sln` ``, `` `SqlServe` `r` ``) | **Automático.** Lo une; sin espacio solo si la palabra unida existe entera en el documento. |
+| Rótulo de un recuadro de código como primera línea del código (`API/Program.cs`, `TERMINAL`), «… rótulo» en medio del código, dos recuadros en un bloque | `tools/rotulos_codigo.py` (primero `--ver`). No lo hace `preparar.py`: hay que mirar la lista antes de decidir si todo bloque empieza con un rótulo (`--todos`). |
 | `**Nota**`, `**Consejo**`, `**Advertencia**`, `**Importante**`, `**Ejercicio 1**` (o en inglés: Note, Tip, Warning, Important, Exercise) seguido de un párrafo | **Automático.** Cuadro `> [!NOTA]`; si el rótulo no es el nombre del tipo, queda como título (`> [!ADVERTENCIA] Warning`). Solo toma el párrafo siguiente. |
 | Otro rótulo en negrita solo en su línea (`**Antes de entregar**`) | **Pendiente.** No se puede saber el tipo: escribir `> [!IMPORTANTE] Antes de entregar` y el texto con `> `. |
 | `<!-- p.1 PORTADA ORIGINAL: ... -->` | **Automático** para `institucion` (lo primero de la portada) y `subtitulo` (lo que sigue al título). Lo que no pudo ubicar queda como pendiente. El comentario se conserva. |
@@ -107,6 +114,9 @@ Con ediciones puntuales sobre `documentos/<nombre>/<nombre>.md`:
 |---|---|
 | Lo que `preparar.py` dejó como pendiente | Resolverlo. |
 | `<!-- p.2 ÍNDICE ORIGINAL: ... -->`, `<!-- ENCABEZADOS/PIES ... -->`, `<!-- p.N -->` | Nada: no se imprimen. El índice se regenera solo. |
+| El índice del original dentro del cuerpo (renglones con `. . . .`; `validar.py` lo avisa) | El extractor no reconoció esas páginas: pasar cada una a un comentario `<!-- p.N ÍNDICE ORIGINAL: ... -->`. |
+| Todos los títulos en un mismo nivel, o un título fundido con su párrafo (`validar.py` lo avisa) | Partes y capítulos en `#`, secciones en `##`, con un script y contando contra los marcadores del original. |
+| Un diagrama o un recuadro de texto aplanado (negritas sueltas sin frases; flechas dentro de una celda) | `tools/region.py` sobre el original: modo `imagen` para `describir-figuras` (tablas de componentes y de conexiones), modo `texto` para rehacer un bloque de código con su sangría. |
 | Títulos ya numerados (`# 1. Introducción`) | Dejar `numerar: no`. O bien quitar los números y poner `numerar: si`. No mezclar. |
 | Filas de tabla como párrafos sueltos (reporte: "posible tabla sin reconstruir") | Convertirlas en tabla Markdown. |
 | Un párrafo todo en cursiva que en el original era una cita | Escribirlo como `> texto`. |
@@ -130,6 +140,18 @@ Revisa el `.md` sin generar el PDF y muestra, con número de línea:
 - **aviso** (código 0; con `--estricto`, 1): sintaxis que no se admite y se imprimiría tal
   cual. Títulos de nivel 4, negrita mal cerrada, guion bajo, etiquetas HTML, enlaces
   internos, líneas `---`, `idioma` desconocido.
+- **error**, también: una tabla con más columnas de las que caben en la página.
+- **aviso de conversión**, solo en un documento que viene de una extracción (cabecera con
+  `fuente:`): rótulo de recuadro como primera línea del código o «… rótulo» en medio,
+  código en línea partido en dos, rótulo de un cuadro sin armar, encabezado de tabla
+  suelto, fila de tabla vacía, tabla con casi todas las celdas vacías, renglón de índice
+  con puntos guía, título fundido con su párrafo, todos los títulos en un mismo nivel.
+
+Ningún PDF está terminado hasta que `validar.py` da **0 errores y 0 avisos**, sea
+nuevo, extraído, traducido o actualizado (regla 8 de `CLAUDE.md`).
+La cobertura de `extraer.py` y el resultado de `comparar.py` cuentan palabras: dan 100%
+y correcto con todos esos defectos dentro (así se entregaron dos manuales). Se valida
+después de preparar y otra vez después de traducir.
 
 Al editar el `.md` de un documento, un hook ejecuta esta misma revisión y devuelve los
 errores en el momento (ver `docs/pipeline.md`, sección 6).
@@ -137,8 +159,8 @@ errores en el momento (ver `docs/pipeline.md`, sección 6).
 ### Paso 4: generar y verificar
 
 ```
-python manual.py documentos/<nombre>/<nombre>.md -o output/<nombre>.pdf
-python tools/comparar.py sources/<original>.pdf output/<nombre>.pdf
+python manual.py documentos/<nombre>/<nombre>.md -o output/<nombre>/<nombre>.pdf
+python tools/comparar.py sources/<original>.pdf output/<nombre>/<nombre>.pdf
 ```
 
 El contenido sale de `sources/`, así que un manual regenerado se compara con su original.
@@ -161,12 +183,13 @@ Cuenta repeticiones, no solo palabras distintas, e informa:
 | `Aviso: figuras` / `Aviso: enlaces` | Distinta cantidad de figuras o de direcciones. | Revisar la imagen o el enlace que falta. Con `--estricto` es falla. |
 | `Aviso: sobran` | Texto del PDF que no está en el origen. | Normal si se agregó un pie de figura o una tabla de datos; si no, quitarlo. |
 | `Aviso: ... pares de palabras` | Orden o contexto distinto. | Normal en tablas de celdas largas; revisar si es mucho. |
+| `Aviso: N palabras cortadas al final de un renglón` | Identificadores que uno de los dos PDF parte donde se le acaba el ancho («cancellationTo» / «ken»). Se contaron enteros. | Nada: es informativo. |
 
 Las únicas faltas aceptables son textos que se reemplazan a propósito. Se declaran, no se
 ignoran en silencio:
 
 ```
-python tools/comparar.py ORIGEN.pdf output/X.pdf --ignorar "Encabezado antiguo" --ignorar-paginas 2
+python tools/comparar.py ORIGEN.pdf output/X/X.pdf --ignorar "Encabezado antiguo" --ignorar-paginas 2
 ```
 
 `--ignorar-paginas` sirve para un índice del original que el extractor no reconoció.
@@ -196,18 +219,18 @@ Los manuales de programación, ingeniería, física y matemática se trabajan en
    puntuales; no reescribir el archivo entero).
 2. Subir `version` (1.0 → 1.1 para correcciones, 2.0 para cambios grandes) y actualizar
    `fecha` (o borrarla para usar la de hoy).
-3. Validar (`tools/validar.py`) y generar con el mismo comando.
+3. Validar (`tools/validar.py`: 0 errores y 0 avisos) y generar con el mismo comando.
 4. Verificar con el `.md` como origen:
 
 ```
-python tools/comparar.py documentos/<nombre>/<nombre>.md output/<nombre>.pdf
+python tools/comparar.py documentos/<nombre>/<nombre>.md output/<nombre>/<nombre>.pdf
 ```
 
 Debe terminar en `RESULTADO: CORRECTO`. Con `--estricto`, tampoco puede sobrar texto ni
 cambiar el orden:
 
 ```
-python tools/comparar.py documentos/<nombre>/<nombre>.md output/<nombre>.pdf --estricto
+python tools/comparar.py documentos/<nombre>/<nombre>.md output/<nombre>/<nombre>.pdf --estricto
 ```
 
 ---
@@ -260,6 +283,7 @@ idioma: es
 | Lista dentro de otra | El ítem hijo lleva 2 espacios o más de sangría que su padre. |
 | Tabla | `\| A \| B \|` + `\|---\|---\|` + filas |
 | Código | bloque entre ```` ``` ````. Cada renglón queda entero: si no cabe, se reduce la letra del bloque (hasta 7 pt, unos 100 caracteres); si aun así no cabe, se parte en un espacio y la continuación lleva una marca gris. |
+| Código con título | ```API/Program.cs en la línea que abre el bloque: el título sale en una franja arriba del recuadro y no es parte del código. Una palabra corta en minúsculas (```python, ```bash) es el lenguaje y se ignora. Al traducir, el título se traduce si es texto («Raíz del proyecto»), no si es un nombre de archivo. |
 | Cuadro destacado | `> [!NOTA]`, `[!CONSEJO]`, `[!ADVERTENCIA]`, `[!IMPORTANTE]`, `[!EJERCICIO]` (+ título opcional) |
 | Cita simple | `> texto` |
 | Imagen con pie | `![pie de figura](ruta/imagen.png)` en una línea sola |
@@ -280,15 +304,15 @@ Un cuadro, una cita o una celda más altos que una página siguen en la página 
 
 ## 8. Verificación final
 
-- [ ] `validar.py` no muestra errores.
+- [ ] `validar.py` no muestra errores ni avisos.
 - [ ] `manual.py` terminó sin errores ni avisos y el peso es razonable (texto: decenas de KB; con imágenes, según `dpi_imagenes`).
 - [ ] `comparar.py` termina en `RESULTADO: CORRECTO` (código 0).
 - [ ] Revisión visual **mínima**: la portada, el índice y las páginas con tablas, figuras
       o código largo, varias por imagen y a escala baja. No revisar todas las páginas.
 
 ```
-python tools/revisar.py output/X.pdf                        # revision.png y revision2.png
-python tools/revisar.py output/X.pdf --paginas 12 --dpi 110  # una página de cerca
+python tools/revisar.py output/X/X.pdf                        # revision.png y revision2.png
+python tools/revisar.py output/X/X.pdf --paginas 12 --dpi 110  # una página de cerca
 ```
 
 El script dice qué página es cada una. Las imágenes las mira el subagente `revisor-visual`.
@@ -318,6 +342,7 @@ El script dice qué página es cada una. Las imágenes las mira el subagente `re
 | Una lista numerada no sigue la numeración | Empieza en el número escrito en su primer ítem; revisar ese número. |
 | Asteriscos impresos (`**a *b** c*`) | Negrita y cursiva cruzadas: cerrar una antes de abrir la otra. `***texto***` sí funciona. |
 | Una barra parte la celda de una tabla | Escribirla como `\|` o dentro de `` `código` ``. Para un salto de renglón dentro de la celda: `<br>`. |
+| «No se generó: l.N: la tabla tiene N columnas…» | La tabla no cabe a lo ancho (en A4, 14 columnas). Casi siempre es una tabla mal reconstruida al extraer: `preparar.py` la rehace; si el documento ya está preparado, rehacerla a mano con sus columnas reales. `validar.py` la marca con su línea. |
 | "Aviso l.N" al generar | Lo que indica esa línea se imprimió tal cual o no se imprimió: corregirlo en el `.md`. Con `--estricto`, código 1. |
 | `[Imagen no encontrada: ...]` en el PDF | La ruta es relativa al `.md`; revisar mayúsculas y carpeta. |
 | Números dobles en títulos ("1. 1. Introducción") | Títulos ya numerados con `numerar: si`: usar `numerar: no` o quitar los números. |

@@ -31,6 +31,14 @@ archivos de `sources/`. Si el archivo no existe, decirlo y parar.
    - "Renglones de código que podrían estar partidos y no se unieron: N": quedaron como
      en el original. Leer la lista; unir a mano solo los que continúan la misma
      instrucción (un texto o un comando cortado a la mitad). Si ninguno, no hacer nada.
+     Señal de un corte por ancho: el primero termina a media palabra (`cancellationTo` /
+     `ken);`, `API.csp` / `roj`) o a media frase de un comentario, y el segundo trae una
+     sangría fija mayor que la del primero (4 espacios más) en todos los casos. Ubicarlos
+     con un script que muestre el largo del primero y la sangría de ambos, y unirlos por
+     número de línea; a media palabra se unen sin espacio.
+   - "Diagramas con texto" (`assets/p<N>-diagrama<M>.png`): cajas y flechas cuyos rótulos
+     quedaron como texto suelto. Pasarlos a `describir-figuras` igual que las figuras: los
+     deja como tabla de componentes y tabla de conexiones.
    - "Símbolos sin mapa de caracteres": quedan como `[SIMBOLO?]` en el `.md`.
      Reemplazarlos aquí por el símbolo que se ve en el original (una casilla es `[ ]`);
      `validar.py` no deja generar mientras quede alguno.
@@ -39,12 +47,19 @@ archivos de `sources/`. Si el archivo no existe, decirlo y parar.
      real (`físico-químico`), dejarlo.
    - "Superíndices o subíndices sin carácter propio": quedaron en línea (`xcrit`).
      Revisar que no cambie el sentido; si cambia, escribirlo de otra forma (`x (crit)`).
-   - Diagrama que quedó como texto suelto (rótulos en negrita solos, sin frases):
-     renderizar **solo esa región** a `assets/` y pasarla a `describir-figuras` para que
-     lo deje como tabla de componentes y tabla de conexiones.
+   - Diagrama o recuadro de texto que el extractor no marcó y quedó aplanado (rótulos en
+     negrita solos, sin frases; un flujo con flechas `──►` metido en una celda):
+     `python tools/region.py "sources/<archivo>" <página> imagen "<desde>" "<hasta>" extracted/<nombre>/assets/p<N>-diagrama.png`
+     y pasar ese recorte a `describir-figuras`. Si es texto en letra de código, usar el
+     modo `texto` (da la columna de cada renglón) y rehacerlo como bloque de código.
 5. Comprobar que no queda nada:
    `grep -n "describir\|TRANSCRIBIR\|SIMBOLO?\|^Enlaces:" extracted/<nombre>/<nombre>.md`
-6. Informar en 6 líneas o menos: páginas, cobertura, pendientes resueltos, qué quedó.
+6. Mirar la estructura, que la cobertura no ve (100% de palabras no es una extracción
+   correcta): en `reporte.md`, «Títulos detectados» contra «Marcadores del PDF»; en el
+   `.md`, `grep -c "^# "`, `"^## "` y `"^### "`. Si todos los títulos están en un nivel, o
+   el índice del original quedó en el cuerpo (renglones con `. . . .`), decirlo en el
+   informe: se corrige al regenerar (`validar.py` lo avisa en `documentos/`).
+7. Informar en 6 líneas o menos: páginas, cobertura, pendientes resueltos, qué quedó.
 
 ## Presupuesto
 

@@ -12,7 +12,7 @@ allowed-tools:
   - PowerShell(python tools/revisar.py output/*)
 ---
 
-# Verificar `output/$ARGUMENTS.pdf`
+# Verificar `output/$ARGUMENTS/$ARGUMENTS.pdf`
 
 Un PDF no está terminado hasta que `comparar.py` termina con código 0.
 
@@ -22,9 +22,9 @@ El contenido sale de `sources/` (regla 9): un manual regenerado se compara con s
 
 | Caso | Comando |
 |---|---|
-| Regenerado, original en PDF | `python tools/comparar.py "sources/<archivo>" output/$ARGUMENTS.pdf` |
-| Regenerado, original en otro formato | `python tools/comparar.py extracted/$ARGUMENTS/$ARGUMENTS.md output/$ARGUMENTS.pdf` |
-| Nuevo, actualizado o traducido | `python tools/comparar.py documentos/$ARGUMENTS/$ARGUMENTS.md output/$ARGUMENTS.pdf --estricto` |
+| Regenerado, original en PDF | `python tools/comparar.py "sources/<archivo>" output/$ARGUMENTS/$ARGUMENTS.pdf` |
+| Regenerado, original en otro formato | `python tools/comparar.py extracted/$ARGUMENTS/$ARGUMENTS.md output/$ARGUMENTS/$ARGUMENTS.pdf` |
+| Nuevo, actualizado o traducido | `python tools/comparar.py documentos/$ARGUMENTS/$ARGUMENTS.md output/$ARGUMENTS/$ARGUMENTS.pdf --estricto` |
 
 - `<archivo>` está en `extracted/$ARGUMENTS/fuente.json`. Es el archivo que el usuario
   autorizó con `/extraer`; el hook pedirá confirmación. Lo lee el script, no la conversación.
@@ -45,23 +45,28 @@ El contenido sale de `sources/` (regla 9): un manual regenerado se compara con s
 - `Plantilla` (pie, índice o idioma): si es el idioma, falta `idioma: en` en la cabecera;
   si es el pie o el índice, es un error de `manual.py`: avisar al usuario.
 - `Aviso: sobran`: aceptable solo si es texto agregado a propósito (pies de figura,
-  tablas de datos). Decirlo en el informe.
+  tablas de datos, las tablas de un diagrama). Decirlo en el informe.
+- `Aviso: N palabras cortadas al final de un renglón…`: informativo. Son identificadores
+  que uno de los dos PDF parte donde se le acaba el ancho; se contaron enteros.
+- `comparar.py` en código 0 dice que están las palabras, no que la conversión esté bien:
+  la estructura la revisa `tools/validar.py`, que es obligatorio en todo documento: sin
+  0 errores y 0 avisos el PDF no está terminado (regla 8; skill `regenerar-manual`, paso 3).
 - Una falta aceptada se declara con `--ignorar "texto"`; no se calla.
 
 ## 2. Vista (dos imágenes como máximo)
 
 ```
-python tools/revisar.py output/$ARGUMENTS.pdf
+python tools/revisar.py output/$ARGUMENTS/$ARGUMENTS.pdf
 ```
 
-Crea `output/revision.png` (portada, índice, primera y última página) y, si hay tablas,
-figuras o código largo, `output/revision2.png` con esas páginas. Imprime qué página es
+Crea `output/$ARGUMENTS/revision.png` (portada, índice, primera y última página) y, si hay tablas,
+figuras o código largo, `output/$ARGUMENTS/revision2.png` con esas páginas. Imprime qué página es
 cada una. Pasar las dos rutas al subagente `revisor-visual`, con esa lista de páginas, el
 idioma del manual y la aclaración de que el texto en español dentro de bloques de código
 es intencional. No abrir las imágenes en esta conversación.
 
 A 58 dpi no se distingue la alineación de un diagrama: si el revisor marca una página,
-verla de cerca con `python tools/revisar.py output/$ARGUMENTS.pdf --paginas N --dpi 110`
+verla de cerca con `python tools/revisar.py output/$ARGUMENTS/$ARGUMENTS.pdf --paginas N --dpi 110`
 y volver a pasarla.
 
 ## 3. Informe
