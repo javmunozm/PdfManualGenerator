@@ -26,8 +26,8 @@ Lo hecho está en `docs/registro.md` (qué, con qué scripts, qué quedó dudoso
    la línea de cierre de una tabla).
 2. **Manual 1, dudoso:** el diagrama 3.1 y la disposición del flujo 8.1 se tomaron del
    manual 2 (mismas palabras). Confirmarlos contra el original solo si el usuario lo autoriza.
-3. **Git:** el trabajo hasta los manuales está en el commit `79fea4f` de `main` (local, sin
-   push). Lo del extractor (E20 a E24) está sin confirmar.
+3. **Git:** todo está en `main` y en GitHub (`79fea4f` manuales y verificación,
+   `8f9634b` extractor E20 a E24). No hay otras ramas.
 
 ## Cuidados
 - Scripts con Write a un archivo; nunca heredoc ni `python -c` para tocar un `.md`.
