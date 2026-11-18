@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Hook PreToolUse: protege sources/ y evita leer originales binarios.
 
-H1  sources/ es del usuario: editar ahí se deniega; leer, buscar o ejecutar
-    comandos que lo nombren pide confirmación.
+H1  sources/ se usa como fuente pero no se altera (regla 1 de CLAUDE.md): editar ahí
+    se deniega; leer, buscar o ejecutar comandos que lo nombren pide confirmación, para
+    que un comando que lo cambie no pase sin verse.
 H2  No se leen PDF ni documentos de Office directamente: se extraen.
 H6  También pide confirmación lo que llega a sources/ sin nombrarlo: un Glob que
     puede entrar ahí (`**/*.pdf`, `s*/*`), un listado o búsqueda recursiva desde la
@@ -163,8 +164,10 @@ def main():
     raiz = absoluta(os.environ.get("CLAUDE_PROJECT_DIR") or cwd, cwd)
     sources = raiz / "sources"
 
-    pide = ("sources/ contiene los documentos del usuario. Solo se usa un archivo de ahí "
-            "si el usuario lo autorizó explícitamente para esta tarea.")
+    pide = ("sources/ contiene los originales del usuario: se usan como fuente (ubicar, "
+            "extraer, recortar, comparar) cuando se pide convertir ese manual, pero nunca "
+            "se alteran (editar, sobrescribir, mover, renombrar, borrar). Confirmar que la "
+            "acción no cambia el archivo de origen.")
 
     if tool in EDITAN | {"Read"}:
         ruta = ti.get("file_path") or ti.get("notebook_path")

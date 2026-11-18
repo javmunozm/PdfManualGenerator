@@ -17,16 +17,28 @@ Se traduce:
 - El título de un bloque de código (lo que sigue a ``` en la línea que lo abre), solo si
   es una frase: ```` ```Raíz del proyecto ```` → ```` ```Project root ````, y la parte entre
   paréntesis de ```` ```API/Program.cs (fragmento) ````. Un nombre de archivo, una ruta o
-  `TERMINAL` quedan igual. Lo de adentro del bloque no se toca.
+  `TERMINAL` quedan igual.
+- Dentro de los bloques de código, **solo el texto para personas**: comentarios (`//`,
+  `/* */`, ` * `, `#`, `--`, `<!-- -->`), anotaciones de árboles de carpetas, renglones de
+  prosa (un CLAUDE.md o README mostrado como código), y el texto humano de las cadenas y
+  plantillas: mensajes de la interfaz, rótulos, `placeholder`, `title`, `aria-label`,
+  mensajes de error y de validación, `echo`/`console.log`, mensajes de `git commit -m`,
+  texto visible entre etiquetas (`<button>Guardar</button>` → `<button>Save</button>`).
+  Mismo número de renglones, misma sangría.
 - En la cabecera (entre `---`), solo los valores de `titulo`, `subtitulo`, `curso`,
   `institucion` y `palabras_clave`. Además, deja `idioma: en` (agrega la línea si no
   está): con eso el índice, el pie y los rótulos de la plantilla salen en inglés.
 
 No se toca, ni un carácter:
 
-- Bloques de código (entre ```) y código en línea (entre `` ` ``), aunque tengan
-  comentarios o cadenas en español. Tampoco los marcadores dentro del código:
-  `<usuario>`, `<Capa>`, `onAlgo` quedan tal cual.
+- El código: palabras clave, identificadores, operadores, cifras, comillas y marcas de
+  comentario. Las cadenas que el código usa como valor: claves (`users:read`), rutas, URL,
+  nombres de archivo, clases CSS, tipos MIME, variables de entorno, valores de rol o de
+  enumeración, `es-CL`, expresiones regulares, claves JSON. Los atributos ligados
+  (`:x="…"`, `@x`, `v-x`, `#x`), `class`, `href`, `to`, `key`, `ref`. Las interpolaciones
+  (`{nombre}`, `${n}`, `{{ user.name }}`, `%s`).
+- El código en línea (entre `` ` ``), y los marcadores dentro del código: `<usuario>`,
+  `<Capa>`, `onAlgo` quedan tal cual.
 - Comandos, nombres de archivo, rutas de imágenes, URL, fórmulas y cifras.
 - Las claves de la cabecera y los valores de `color`, `tamano`, `indice`, `numerar`,
   `version`, `logo`, `dpi_imagenes`, `fuente`, `autor`. De `fecha` solo se traduce el
@@ -44,5 +56,5 @@ Cuida:
 - Una celda `[ ]` es una casilla sin marcar: déjala igual.
 
 No abras ningún otro archivo. Al terminar responde una sola línea:
-`ok <archivo>: <n> títulos, <n> bloques de código sin cambios`, o el problema que impidió
+`ok <archivo>: <n> títulos, <n> bloques de código con el código sin cambios`, o el problema que impidió
 terminar. No copies la traducción en la respuesta.

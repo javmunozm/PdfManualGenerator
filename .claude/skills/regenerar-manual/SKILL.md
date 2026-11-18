@@ -16,8 +16,9 @@ allowed-tools:
 
 # Regenerar `$ARGUMENTS`
 
-Requiere `extracted/$ARGUMENTS/` sin pendientes. Si no existe, pedir al usuario que
-ejecute `/extraer <archivo>` (esa skill es la que autoriza usar `sources/`).
+Requiere `extracted/$ARGUMENTS/` sin pendientes. Si no existe, extraerlo primero
+con la skill `extraer` (regla 1: pedir el manual autoriza usar su original; extraer no es
+modificar).
 
 ## Pasos
 

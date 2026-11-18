@@ -67,11 +67,11 @@ por partes, en subagentes, y se verifica con un script en vez de releer.
 7. Cuando el PDF esté verificado, borrar `documentos/$ARGUMENTS/partes/`.
 
 ## Qué no se traduce (lo comprueba el paso 5)
-
-Bloques de código y código en línea, comandos, nombres de archivo, rutas de imágenes, URL,
-fórmulas, cifras, claves de la cabecera, marcas `[!NOTA]`, `\salto` y comentarios `<!-- -->`.
-Sí se traducen: títulos, texto, celdas, pies de figura, títulos de cuadros, el título de un
-bloque de código cuando es una frase, y los valores `titulo` y `subtitulo` de la cabecera.
+El código (en bloques y en línea), comandos, archivos, claves, URL, fórmulas, cifras, la
+cabecera salvo `titulo`/`subtitulo`, `[!NOTA]`, `\salto` y los `<!-- -->` del `.md`. Dentro
+de los bloques sí se traduce lo que no es código (comentarios, árboles, mensajes y textos
+de la interfaz); `comparar_traduccion.py` exige el mismo código renglón por renglón, y el
+párrafo o la tabla que cita un mensaje debe decir lo mismo que el código.
 
 ## Presupuesto
 

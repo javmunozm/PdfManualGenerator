@@ -1,15 +1,15 @@
 ---
 name: extraer
-description: Extrae un archivo de sources/ a Markdown completo en extracted/. Solo la invoca el usuario; invocarla autoriza el uso de ese archivo y de ningún otro.
+description: Extrae un archivo de sources/ a Markdown completo en extracted/. Usar cuando el usuario pide convertir, extraer o pasar a manual un archivo de sources/. Extraer no modifica el original.
 argument-hint: <archivo de sources/>
-disable-model-invocation: true
 effort: medium
 ---
 
 # Extraer `$ARGUMENTS`
 
-El usuario autorizó **solo** `sources/$ARGUMENTS`. No listar la carpeta ni abrir otros
-archivos de `sources/`. Si el archivo no existe, decirlo y parar.
+`sources/$ARGUMENTS` es material de origen (regla 1): se ubica, se extrae y se recorta;
+nunca se altera (ni editar, sobrescribir, mover, renombrar ni borrar). Si no está en la
+raíz, buscarlo por su nombre en las subcarpetas; si no existe, decirlo y parar.
 
 ## Pasos
 

@@ -26,10 +26,9 @@ El contenido sale de `sources/` (regla 9): un manual regenerado se compara con s
 | Regenerado, original en otro formato | `python tools/comparar.py extracted/$ARGUMENTS/$ARGUMENTS.md output/$ARGUMENTS/$ARGUMENTS.pdf` |
 | Nuevo, actualizado o traducido | `python tools/comparar.py documentos/$ARGUMENTS/$ARGUMENTS.md output/$ARGUMENTS/$ARGUMENTS.pdf --estricto` |
 
-- `<archivo>` está en `extracted/$ARGUMENTS/fuente.json`. Es el archivo que el usuario
-  autorizó con `/extraer`; el hook pedirá confirmación. Lo lee el script, no la conversación.
-  Si no está en la raíz de `sources/`, buscarlo solo por ese nombre (puede estar en una
-  subcarpeta); no listar la carpeta.
+- `<archivo>` está en `extracted/$ARGUMENTS/fuente.json`. Es el original del manual: se
+  usa como fuente y no se modifica (regla 1). Lo lee el script, no la conversación. Si no
+  está en la raíz de `sources/`, buscarlo por ese nombre (puede estar en una subcarpeta).
 - Contra el original, leer la falla antes de tocar el `.md`:
   - La misma frase en casi todas las páginas: es un encabezado o pie del original que
     `comparar.py` no reconoció. No es una pérdida; es un defecto de la herramienta

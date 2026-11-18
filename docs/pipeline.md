@@ -11,7 +11,7 @@ Errores conocidos y pendientes: [auditoria.md](auditoria.md).
 ## 1. Flujo
 
 ```
-sources/            original del usuario (no se toca sin permiso; no se versiona)
+sources/            original del usuario (se usa como fuente; nunca se modifica; no se versiona)
    |  /extraer  ->  tools/extraer.py
 extracted/<n>/      <n>.md + assets/ + reporte.md + fuente.json     registro fiel del original
    |  tools/costo.py            cuánto cuesta lo que sigue
@@ -58,8 +58,7 @@ validar, generar, comparar).
 Origen para la etapa 9. El contenido sale de `sources/` (regla 9 de `CLAUDE.md`):
 
 - **Regenerado**: el original, si es un PDF (`sources/<archivo>`: lo lee el script, no
-  entra a la conversación; es el archivo que el usuario autorizó con `/extraer` y el hook
-  pide confirmación). Si el original es de otro formato, `extracted/<n>/<n>.md`.
+  entra a la conversación; se usa como fuente y no se modifica, regla 1). Si el original es de otro formato, `extracted/<n>/<n>.md`.
 - **Traducido**: se compara dos veces. Antes de traducir, el PDF en español contra el
   original, como regenerado. Al final, el PDF en inglés contra `documentos/<n>/<n>.md
   --estricto`. Entre ambos, `comparar_traduccion.py` (etapa 6). Así ningún tramo queda
@@ -110,7 +109,7 @@ Skills (`.claude/skills/<nombre>/SKILL.md`); se invocan con `/<nombre>`:
 
 | Skill | Caso | Quién la invoca | Qué hace |
 |---|---|---|---|
-| `/extraer <archivo>` | B | **Solo el usuario.** Invocarla es el permiso para ese archivo de `sources/`. | Etapas 1 a 3. |
+| `/extraer <archivo>` | B | El usuario, o Claude cuando se le pide convertir un manual (regla 1: extraer no es modificar). | Etapas 1 a 3. |
 | `/costo <n>` | todos | Usuario o Claude | Etapa 2: tamaño, etapas caras y plan por tandas. |
 | `/regenerar-manual <n>` | B | Usuario o Claude | Etapas 2, 4, 7, 8 y llama a `traducir-manual` y `verificar-pdf`. |
 | `/traducir-manual <n>` | B, A | Usuario o Claude | Etapas 5 y 6. No se usa con `Manual_Curso_IA_Python_v2`. |

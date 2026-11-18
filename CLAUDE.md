@@ -8,14 +8,21 @@ sources/ --extraer.py--> extracted/ --preparar.py--> documentos/ --validar.py, m
 
 ## Reglas (obligatorias)
 
-1. **`sources/` es del usuario.** No leer, listar, extraer ni probar con sus archivos sin
-   permiso explícito para ese archivo. Nunca modificarlos. Para probar herramientas, usar
+1. **`sources/` se usa, no se modifica.** Sus archivos son material de origen: ubicarlos,
+   extraerlos, recortarlos (`region.py`) y compararlos (`comparar.py`) está permitido. Que
+   el usuario pida convertir un manual ya autoriza su archivo, sin pedirle `/extraer`.
+   **Lo único prohibido** es alterar el archivo de origen: editarlo, sobrescribirlo,
+   moverlo, renombrarlo o borrarlo, o cualquier operación que deje otro resultado en ese
+   mismo archivo. Lo producido va siempre a `extracted/`, `documentos/` u `output/`.
+   Extraer no es modificar. Para probar herramientas (no para convertir un manual), usar
    solo archivos propios (`ejemplo.md`, `ejemplo.pdf`, los que crea `tests/`).
 2. **Manuales técnicos en inglés.** Los manuales de programación, ingeniería, física y
    matemática se traducen al inglés y se trabajan en inglés: el `.md` de `documentos/`
    y el PDF quedan en inglés. Única excepción: `Manual_Curso_IA_Python_v2`, que se
-   mantiene en español. Al traducir: todo el contenido (regla 4), sin tocar código,
-   comandos, nombres de archivos, fórmulas ni cifras.
+   mantiene en español. Al traducir: todo el contenido (regla 4), también lo que no es
+   código dentro de los bloques de código (comentarios, anotaciones de árboles, textos de
+   la interfaz, mensajes); sin tocar el código, comandos, nombres de archivos, claves,
+   fórmulas ni cifras. Lo comprueba `tools/comparar_traduccion.py`.
 3. **No abrir originales en el contexto.** Nada de leer PDF, Word, PowerPoint o Excel
    directamente: se extrae con `tools/extraer.py` y se lee primero `reporte.md`.
 4. **Transcribir, no resumir.** La meta es el 100% de la información.
@@ -54,7 +61,8 @@ python -m unittest discover tests                     # pruebas (no usan sources
 
 Usar la skill del caso en vez de armar los pasos de memoria: `/costo` antes de un
 documento largo, `/regenerar-manual`, `/traducir-manual`, `/nuevo-manual`,
-`/actualizar-manual`, `/verificar-pdf`. `/extraer` solo la invoca el usuario.
+`/actualizar-manual`, `/verificar-pdf`, `/extraer` (también cuando el usuario pide
+convertir un manual: regla 1).
 Las imágenes y la traducción van siempre a subagentes (`describir-figuras`,
 `traductor`, `revisor-visual`): no entran a la conversación principal.
 

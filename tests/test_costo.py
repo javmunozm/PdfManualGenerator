@@ -88,7 +88,7 @@ class Traduccion(Caso):
 
     def test_detecta_lo_que_no_debia_cambiar(self):
         casos = {
-            "bloques de código": self.BIEN.replace("print('hola')  # saludo", "print('hello')  # greeting"),
+            "bloques de código": self.BIEN.replace("print('hola')  # saludo", "echo('hola')  # saludo"),
             "código en línea": self.BIEN.replace("`python a.py`", "`python b.py`"),
             "cifras": self.BIEN.replace("1,250", "1,520"),
             "enlaces": self.BIEN.replace("https://ejemplo.org", "https://example.org"),
@@ -105,6 +105,47 @@ class Traduccion(Caso):
                 rc, out = self.comparar(texto)
                 self.assertEqual(rc, 1, out)
                 self.assertIn(nombre, out)
+
+    def test_comentarios_y_textos_del_codigo_se_traducen_el_codigo_no(self):
+        bloque = ("```\nconst msg = 'Usuario eliminado.' // aviso al usuario\n"
+                  "├─ Domain/   # Entidades y reglas (UserProfile)\n"
+                  "- Domain: entidades y reglas. Depende de IUserAccessor.\n"
+                  "return res.status(403)  -- sin permiso\n"
+                  '<button :disabled="saving" title="Guardar">Guardar {{ n }} cambios</button>\n```\n')
+        bien = ("```\nconst msg = 'User deleted.' // notice to the user\n"
+                "├─ Domain/   # Entities and rules (UserProfile)\n"
+                "- Domain: entities and rules. Depends on IUserAccessor.\n"
+                "return res.status(403)  -- no permission\n"
+                '<button :disabled="saving" title="Save">Save {{ n }} changes</button>\n```\n')
+        a, b = self.tmp / "es.md", self.tmp / "en.md"
+        a.write_text(self.ORIGINAL + "\n" + bloque, encoding="utf-8")
+        cambios = {
+            "comentarios y cadenas": (bien, 0),
+            "palabra clave": (bien.replace("const msg", "constante msg"), 1),
+            "identificador en texto suelto": (bien.replace("IUserAccessor", "IUserService"), 1),
+            "un renglón menos": (bien.replace("- Domain: entities and rules. Depends on IUserAccessor.\n", ""), 1),
+            "cifra en el código": (bien.replace("status(403)", "status(401)"), 1),
+            "atributo de plantilla": (bien.replace(':disabled="saving"', ':disabled="busy"'), 1),
+            "interpolación": (bien.replace("{{ n }}", "{{ count }}"), 1),
+        }
+        for nombre, (texto, esperado) in cambios.items():
+            with self.subTest(nombre):
+                b.write_text(self.BIEN + "\n" + texto, encoding="utf-8")
+                rc, out = run("tools/comparar_traduccion.py", a, b)
+                self.assertEqual(rc, esperado, out)
+        b.write_text(self.BIEN + "\n" + bien, encoding="utf-8")
+        self.assertIn("5 renglones con comentarios o textos traducidos", run("tools/comparar_traduccion.py", a, b)[1])
+
+    def test_cita_de_un_mensaje_de_la_app_se_traduce_con_el_codigo(self):
+        es = "```\nthrow new Error('Configuración inválida')\n```\n\nSi ves `Configuración inválida`, revisa.\n"
+        en = "```\nthrow new Error('Invalid configuration')\n```\n\nIf you see `Invalid configuration`, check.\n"
+        a, b = self.tmp / "es.md", self.tmp / "en.md"
+        a.write_text(self.ORIGINAL + "\n" + es, encoding="utf-8")
+        for texto, esperado in ((en, 0), (en.replace("If you see `Invalid configuration`", "If you see `Bad config`"), 1)):
+            with self.subTest(texto[-40:]):
+                b.write_text(self.BIEN + "\n" + texto, encoding="utf-8")
+                rc, out = run("tools/comparar_traduccion.py", a, b)
+                self.assertEqual(rc, esperado, out)
 
     def test_avisa_si_la_traduccion_es_un_resumen(self):
         largo = self.ORIGINAL.replace("Ejecuta", "Texto de relleno. " * 40 + "Ejecuta")
@@ -212,7 +253,9 @@ class SkillsYAgentes(unittest.TestCase):
                 for agente in re.findall(r"subagente `([\w-]+)`", texto):
                     self.assertIn(agente, agentes)
         _, extraer = self.cabecera(RAIZ / ".claude" / "skills" / "extraer" / "SKILL.md")
-        self.assertIn("disable-model-invocation: true", extraer)         # solo la invoca el usuario
+        # Regla 1: pedir un manual autoriza extraer su original; lo prohibido es alterarlo
+        self.assertNotIn("disable-model-invocation: true", extraer)
+        self.assertIn("nunca se altera", extraer)
 
     def test_agentes(self):
         for a in sorted((RAIZ / ".claude" / "agents").glob("*.md")):

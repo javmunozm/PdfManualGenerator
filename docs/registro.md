@@ -113,3 +113,67 @@ Commit `79fea4f` en `main` antes de empezar (todo lo anterior). Cambios y cómo 
   pierde; la cobertura lo marca.
 - Los originales de la serie no se usaron: E20, E21 y E24 se probaron con PDF que imitan
   lo que mostraba su extracción, no con el original.
+
+## 17/11/2026 · Manual 3 (Manual_3_Node_Vue3_MongoDB) y regla 1
+
+Primer original de la serie extraído con E20 a E24. El original se usó solo como fuente
+(extraer, `region.py`, un script de lectura de glifos y `comparar.py`); no se alteró.
+
+- `extraer.py`: 149 p., cobertura 100%, 111 marcadores. Reunido 1 renglón de código
+  (correcto); los 47 dudosos eran instrucciones aparte (no se unió ninguno).
+- `describir-figuras`: portada y diagrama p.11 (6 componentes, 6 conexiones). Símbolos:
+  p.147, 11 casillas → `[ ]`. **Dudoso:** p.103, el glifo no tiene mapa de caracteres
+  (código 0) y el original lo muestra como caja vacía; se puso `↔` por contexto.
+- `preparar.py` + `rotulos_codigo.py --todos` (17 bloques con rótulo no reconocido, todos
+  rótulos): `validar.py` 0/0. Portada armada como la del manual 4.
+- **Falló, no lo detectó `validar.py`:** el extractor dejó los capítulos en `##` con el
+  antetítulo («PARTE I · CAPÍTULO 1 …») y las secciones en `###` con el nivel en mayúsculas
+  («AVANZADO»). Se corrigió con un script: partes y capítulos en `#`, secciones en `##`,
+  «(avanzado)» como en el índice; 4 + 16 + 91 = 111 marcadores. Falta que `validar.py`
+  avise de capítulos con antetítulo en un nivel inferior.
+- Español contra el original: `comparar.py --ignorar "PARTE I · CAPÍTULO"` (una por parte):
+  CORRECTO, 0 de 35.956 palabras faltan.
+- Traducción: 11 partes (`--tanda 10000`), glosario sacado del manual 4 (123 de 126 títulos
+  en común). `comparar_traduccion.py`: 3 fragmentos de código en línea traducidos
+  (`?v=<fecha>`, `v-model:nombre`, `ask(opciones)`), devueltos por script; luego CORRECTO.
+  El cap. 14 queda «Dockerization and building images» (el manual 4 usa «Building Images»).
+- PDF en inglés: 149 p., 516 KB; `validar.py` 0/0; `comparar.py --estricto` CORRECTO;
+  `revisor-visual` sin observaciones. Temporales y `partes/` borrados.
+- Regla 1 de `CLAUDE.md` reescrita por pedido del usuario: `sources/` se usa como fuente
+  (ubicar, extraer, recortar, comparar) sin pedir `/extraer`; solo se prohíbe alterar el
+  original. Ajustados `extraer`, `regenerar-manual`, `verificar-pdf`, `docs/pipeline.md` y
+  los mensajes de `guardia.py` (18 pruebas del hook OK).
+
+## 17/11/2026 · Manuales 1 a 4: texto en español dentro del código
+
+El usuario vio español en los PDF en inglés de los manuales 1 y 4: todo estaba dentro de los
+bloques de código (comentarios, árboles, CLAUDE.md, mensajes de la interfaz, `echo`), que la
+regla 2 dejaba sin tocar. Decisión del usuario: se traduce todo lo que no es código, en los
+cuatro manuales. Regla 2 de `CLAUDE.md`, `traductor.md` y `traducir-manual` al día.
+
+- `tools/comparar_traduccion.py`: los bloques ya no se exigen idénticos sino con el mismo
+  código: `esqueleto` (sin comentarios, cadenas de texto vacías, en plantillas solo etiquetas e
+  interpolaciones; los atributos ligados `:x`/`@x`/`v-x` y `class`/`href`… cuentan como código),
+  comentarios de varios renglones, y `solo_texto` para prosa o diagramas dentro del código
+  (mismos identificadores, cifras, símbolos y sin palabras clave cambiadas). El código en línea
+  de la prosa puede cambiar solo si cita un texto de la app traducido con ella. Pruebas nuevas
+  en `tests/test_costo.py` (145 en total, todas OK).
+- Trabajo en copias del scratchpad (respaldo de los cuatro `.md` antes de instalar):
+  `codigo_es.py` sacó los renglones de código con español (2.692, 14 tandas a subagentes
+  Sonnet de ~55.000 tokens cada una) y los volvió a poner por número de renglón, comprobando
+  que el renglón no hubiera cambiado. Citas de la prosa a mensajes de la app (403/409/sin
+  conexión, «Register user», «Invalid configuration», «Categories») cambiadas para que digan
+  lo mismo que el código.
+- **Falló y se corrigió:** el primer detector de español (tildes o varias palabras comunes)
+  dejó pasar mensajes cortos (`echo "Activado: $1"`, `'Tu perfil fue actualizado.'`); lo vio
+  el revisor visual. Se rehízo con el vocabulario de cada manual (palabras de la prosa en
+  español que nunca aparecen en la prosa en inglés): segunda vuelta de ~130 renglones por
+  manual y 10 reemplazos exactos al final. Un error del propio detector (palabra seguida de
+  `:`) se corrigió en la tercera vuelta.
+- Resultado: los cuatro con `comparar_traduccion` correcto, validar 0/0, `comparar --estricto`
+  código 0. Queda en español solo lo que es código o marcador: identificadores (`guardar`,
+  `Ejemplo`), archivos (`crear-solucion.sh`, `usuarios.csv`), marcadores (`<tema>`,
+  `<paquete>`, `ask(opciones)`), valores de ejemplo (`rrhh`, `Equipo-Marketing`, `temporal`,
+  `/no-existe`), nombres de personas, `<html lang="es">`, y la salida de `dotnet` en español
+  citada junto a la inglesa («Compilación correcta» / «Build succeeded»).
+- Revisión visual de los cuatro antes de la segunda vuelta: sin problemas de formato.
