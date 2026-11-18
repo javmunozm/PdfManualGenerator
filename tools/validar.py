@@ -125,6 +125,13 @@ class Checker:
         while i < len(lines):
             line, st, n = lines[i], lines[i].strip(), i + 1
             if not st or st in ("\\newpage", "\\salto", "<!-- salto -->"):
+                if st:                    # cada capítulo (#) ya empieza página: el salto deja una en blanco
+                    j = i + 1
+                    while j < len(lines) and not lines[j].strip():
+                        j += 1
+                    if j < len(lines) and re.match(r"#\s", lines[j].strip()):
+                        self.aviso(n, "salto de página antes de un capítulo (#): el capítulo ya empieza "
+                                      "página nueva, así que queda una página en blanco; quitar el salto")
                 i += 1
             elif st.startswith("```"):
                 j = i + 1
@@ -160,6 +167,10 @@ class Checker:
                 i += 1
             elif st.startswith("|"):
                 widths, total, empty = set(), 0, 0
+                if "`" in st and i + 1 < len(lines) and all(
+                        re.fullmatch(r":?-{2,}:?", c) for c in manual.split_row(lines[i + 1])):
+                    self.aviso(n, "código (`...`) en el encabezado de una tabla: sale como un recuadro "
+                                  "blanco sobre el color del encabezado; quitar las comillas invertidas")
                 while i < len(lines) and lines[i].strip().startswith("|"):
                     cells = manual.split_row(lines[i])
                     if not all(re.fullmatch(r":?-{2,}:?", c) for c in cells):
@@ -183,8 +194,19 @@ class Checker:
                 m = re.match(r"\[!(\w+)\]", first)
                 if m and m.group(1).upper() not in manual.CALLOUTS:
                     self.aviso(n, f"tipo de cuadro [!{m.group(1)}] desconocido: sale como cita gris")
+                prev, warned_list = "", False
                 while i < len(lines) and lines[i].strip().startswith(">"):
-                    self.inline(re.sub(r"^\s*>\s?(\[!\w+\])?", "", lines[i]), i + 1)
+                    body = re.sub(r"^\s*>\s?(\[!\w+\])?", "", lines[i])
+                    is_title = i + 1 == n and m is not None
+                    # los renglones de un párrafo de cuadro se unen: una lista sale como un solo párrafo
+                    if (not warned_list and not is_title and prev.strip()
+                            and re.match(r"\s*([-*+]|\d+[.)])\s", body)):
+                        self.aviso(i + 1, "lista dentro de un cuadro (>): sus ítems se unen en un solo "
+                                          "párrafo; separar cada ítem con un renglón «>» vacío y "
+                                          "empezarlo con «•»")
+                        warned_list = True
+                    self.inline(body, i + 1)
+                    prev = "" if is_title else body
                     i += 1
             elif manual.ITEM.match(line):
                 while i < len(lines):                     # ítems y sus renglones de continuación

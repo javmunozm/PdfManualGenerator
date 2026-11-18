@@ -58,15 +58,17 @@ El contenido sale de `sources/` (regla 9): un manual regenerado se compara con s
 python tools/revisar.py output/$ARGUMENTS/$ARGUMENTS.pdf
 ```
 
-Crea `output/$ARGUMENTS/revision.png` (portada, índice, primera y última página) y, si hay tablas,
-figuras o código largo, `output/$ARGUMENTS/revision2.png` con esas páginas. Imprime qué página es
-cada una. Pasar las dos rutas al subagente `revisor-visual`, con esa lista de páginas, el
-idioma del manual y la aclaración de que el texto en español dentro de bloques de código
-es intencional. No abrir las imágenes en esta conversación.
+Crea `revision.png` (portada, índice, primera y última página) y, con tablas, figuras o
+código largo, `revision2.png`; imprime qué página es cada una y si hay páginas vacías (debe
+decir «Sin páginas vacías»; si no, buscar el `\salto` que las produce). Pasar las rutas al
+subagente `revisor-visual` con esa lista, el idioma y la aclaración de que el español dentro
+del código es intencional. No abrir las imágenes en esta conversación.
 
-A 58 dpi no se distingue la alineación de un diagrama: si el revisor marca una página,
-verla de cerca con `python tools/revisar.py output/$ARGUMENTS/$ARGUMENTS.pdf --paginas N --dpi 110`
-y volver a pasarla.
+El muestreo no ve un defecto repetido (`docs/generator.md`, secciones 8 y 11). En un manual
+nuevo o una sección cambiada, ubicar sus páginas por su texto (PyMuPDF) y pasarlas con
+`--paginas N,M --dpi 110` (80 para la disposición), con una página con cuadro y otra con
+tabla; lo mismo para ver de cerca una página marcada. Tras corregir, volver a pasar esas
+páginas diciendo qué debía quedar arreglado.
 
 ## 3. Informe
 
@@ -74,5 +76,4 @@ Tres líneas: resultado de `comparar.py`, observaciones del revisor, peso del PD
 
 ## Presupuesto
 
-- Nunca leer el PDF ni revisar página por página.
-- Máximo dos imágenes por verificación.
+- Nunca leer el PDF ni revisar página por página; dos imágenes por pasada como máximo.

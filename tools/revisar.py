@@ -11,9 +11,13 @@ Sin --paginas crea dos imágenes, cada una con hasta 4 páginas una al lado de o
     output/<nombre>/revision2.png    las páginas con más riesgo: la tabla más cargada, la última
                             tabla, una figura y el bloque de código más largo
 
+Sin --paginas también lista las páginas de contenido casi vacías (solo encabezado y pie), que
+el muestreo no ve.
+
 Con --paginas crea solo output/<nombre>/revision.png con esas páginas (para ver de cerca una que
-el revisor marcó). Las imágenes no se abren en la conversación principal: se pasan al
-subagente revisor-visual, junto con la lista de páginas que imprime este script.
+el revisor marcó, o las páginas de una sección nueva). Las imágenes no se abren en la
+conversación principal: se pasan al subagente revisor-visual, junto con la lista de páginas
+que imprime este script.
 
 Código de salida: 0 correcto, 2 error.
 """
@@ -75,6 +79,13 @@ def risky(doc, skip):
     return out[:4]
 
 
+def blank_pages(doc, start):
+    """Páginas de contenido con solo encabezado y pie (5 renglones o menos): las que el
+    muestreo de páginas no ve, como un salto de página repetido al final de cada capítulo."""
+    return [p.number + 1 for p in doc
+            if p.number + 1 >= start and len(p.get_text().strip().splitlines()) <= 5]
+
+
 def main():
     ap = argparse.ArgumentParser(description="Arma las hojas de revisión visual de un PDF.")
     ap.add_argument("pdf")
@@ -120,6 +131,12 @@ def main():
         print(f"{second}: " + "; ".join(f"p.{n} {why}" for n, why in extra))
     else:
         print("Sin tablas, figuras ni código largo: no hace falta una segunda imagen.")
+    vacias = blank_pages(doc, start)
+    if vacias:
+        print(f"Páginas casi vacías (solo encabezado y pie): {', '.join(map(str, vacias))}. "
+              "Revisar el .md: un \\salto antes de un capítulo deja una página en blanco.")
+    else:
+        print("Sin páginas vacías.")
     return 0
 
 

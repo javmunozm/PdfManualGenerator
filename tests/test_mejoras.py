@@ -723,5 +723,47 @@ class Coherencia(unittest.TestCase):
         self.assertGreater(revisadas, 20)                        # la búsqueda encontró las citas
 
 
+class FormatoDeManualNuevo(Caso):
+    """Defectos de formato vistos en el manual MongoDB (18/11/2026), que validar.py no avisaba
+    y el muestreo de revisar.py no mostraba."""
+
+    def test_salto_antes_de_capitulo_se_avisa(self):
+        md = self.md("salto", "# Uno\n\nTexto.\n\n\\salto\n\n# Dos\n\nMás.\n")
+        rc, out = run("tools/validar.py", md, "--estricto")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("salto de página antes de un capítulo", out)
+
+    def test_salto_antes_de_una_seccion_no_se_avisa(self):
+        md = self.md("salto2", "# Uno\n\nTexto.\n\n\\salto\n\n## Sección\n\nMás.\n")
+        self.assertNotIn("salto de página", run("tools/validar.py", md)[1])
+
+    def test_lista_dentro_de_un_cuadro_se_avisa(self):
+        md = self.md("cuadro", "# T\n\n> [!NOTA] Título\n> - uno\n> - dos\n")
+        rc, out = run("tools/validar.py", md, "--estricto")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("lista dentro de un cuadro", out)
+
+    def test_items_separados_por_renglon_vacio_no_se_avisan(self):
+        md = self.md("cuadro2", "# T\n\n> [!NOTA] Título\n> • uno\n>\n> • dos\n\n> [!NOTA] Otro\n> - solo uno\n")
+        self.assertNotIn("lista dentro de un cuadro", run("tools/validar.py", md)[1])
+
+    def test_codigo_en_el_encabezado_de_una_tabla_se_avisa(self):
+        md = self.md("tabla", "# T\n\n| `campo` | Valor |\n|---|---|\n| `a` | 1 |\n")
+        rc, out = run("tools/validar.py", md, "--estricto")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("encabezado de una tabla", out)
+        md2 = self.md("tabla2", "# T\n\n| Campo | Valor |\n|---|---|\n| `a` | 1 |\n")
+        self.assertNotIn("encabezado de una tabla", run("tools/validar.py", md2)[1])
+
+    def test_revisar_lista_la_pagina_en_blanco(self):
+        md = self.md("blanco", "# Uno\n\nTexto.\n\n\\salto\n\n# Dos\n\nMás.\n")
+        pdf = self.tmp / "blanco.pdf"
+        rc, out = run("manual.py", md, "-o", pdf)
+        self.assertEqual(rc, 0, out)
+        rc, out = run("tools/revisar.py", pdf)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Páginas casi vacías", out)
+
+
 if __name__ == "__main__":
     unittest.main()

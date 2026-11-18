@@ -15,6 +15,8 @@ allowed-tools:
 # Manual nuevo
 
 Nombre de carpeta y archivo: primer argumento (`$0`), sin espacios ni tildes.
+Lecciones de los manuales ya hechos (investigación, redacción, formato, exámenes):
+`docs/generator.md`, sección 11. Leerla antes de empezar.
 
 ## Pasos
 
@@ -26,25 +28,30 @@ Nombre de carpeta y archivo: primer argumento (`$0`), sin espacios ni tildes.
 2. Investigar en la web antes de escribir. El contenido de un manual sale de `sources/`;
    esta skill es para cuando no hay un archivo de origen (si lo hay, es el caso B:
    `/extraer` y `/regenerar-manual`). No se escribe de memoria.
-   - Buscar por capítulo del índice, usando como pregunta lo que el lector necesita saber.
-   - Preferir fuentes primarias: documentación oficial, normas, el autor original.
-     Comprobar que versiones, cifras y fechas estén vigentes.
+   - Buscar por capítulo del índice; preferir fuentes primarias y comprobar que versiones,
+     cifras y fechas estén vigentes (buscar cambios del año en curso).
    - Anotar en `documentos/$0/investigacion.md`, por capítulo: el dato, su URL y la fecha
-     de consulta. Comandos, cifras y versiones se anotan tal como están en la página.
-   - Lo que no se pudo confirmar en ninguna fuente se informa al usuario; no se rellena.
+     de consulta, tal como está en la página.
+   - Lo que **se puede** confirmar se confirma antes de entregar; lo que no está en ninguna
+     fuente se informa al usuario y el texto lo dice, sin inventar.
+   - Si las fuentes no coinciden, lo de las otras va en un apéndice escrito para el
+     lenguaje del manual (sección 11).
 3. Idioma: los manuales de programación, ingeniería, física y matemática se escriben
    **en inglés** (excepción: `Manual_Curso_IA_Python_v2`). El resto, en el idioma del lector.
 4. Crear `documentos/$0/$0.md` con la cabecera de `ejemplo.md` (titulo, subtitulo, autor,
-   curso, institucion, version, color, numerar, e `idioma: en` si va en inglés) y los capítulos. Se redacta desde las
-   notas de `investigacion.md`, con palabras propias (sin copiar párrafos de las páginas)
-   y al nivel del lector acordado. El último capítulo es «Referencias» («References»),
-   con los enlaces usados. Las imágenes van en `documentos/$0/imagenes/`.
+   curso, institucion, version, color, numerar, e `idioma: en` si va en inglés). Se redacta
+   desde `investigacion.md`, con palabras y ejemplos propios, al nivel del lector. El último
+   capítulo es «Referencias» («References»). Imágenes en `documentos/$0/imagenes/`.
+   Un manual largo se escribe por partes en `documentos/$0/partes/` y se une en `$0.md`.
 5. Si parte de la información viene de archivos, se extrae primero (`/extraer`) y se copia
    desde `extracted/`, nunca desde el original. Lo que dice el archivo manda sobre la web.
 6. `python tools/validar.py documentos/$0/$0.md --estricto` hasta que no muestre nada.
 7. `python manual.py documentos/$0/$0.md -o output/$0/$0.pdf`
 8. `python tools/comparar.py documentos/$0/$0.md output/$0/$0.pdf --estricto`
-9. Skill `verificar-pdf` para la revisión visual.
+9. Skill `verificar-pdf`: muestreo, «Sin páginas vacías» y una página con cuadro y otra con
+   tabla vistas de cerca.
+10. Registrar en `docs/registro.md` qué se hizo, qué falló y qué quedó sin confirmar, y
+    borrar los temporales (regla 10).
 
 ## Sintaxis admitida
 
@@ -52,7 +59,8 @@ Nombre de carpeta y archivo: primer argumento (`$0`), sin espacios ni tildes.
 (anidadas con 2 espacios o más de sangría), tablas (`<br>` para un salto dentro de una
 celda), bloques de código (con título: ```` ```API/Program.cs ````),
 `> [!NOTA|CONSEJO|ADVERTENCIA|IMPORTANTE|EJERCICIO] título`, `![pie](ruta)` sola en la
-línea, `\salto`. Sin HTML ni notas al pie.
+línea, `\salto` (nunca antes de `#`). Lista dentro de un cuadro: `> • ítem` con un renglón
+`>` vacío entre ítems. Sin HTML, notas al pie ni código en encabezados de tabla.
 Detalle: `docs/generator.md`, sección 7.
 
 ## Presupuesto

@@ -523,3 +523,21 @@ reprodujo de lo que mostraba su extracción.
 | N17 (nuevo) | Abierto. Un párrafo cuyo texto toca la línea de cierre de una tabla se pierde al extraer; el reporte lo marca (cobertura menor a 100% en esa página), no es silencioso. Visto con un PDF de prueba, no en un original. |
 
 Pruebas: 143, todas OK.
+
+## 15. Primer manual nuevo sin origen (MongoDB, 18/11/2026)
+
+Manual escrito con `nuevo-manual` (preparación del examen MongoDB Associate Developer C#).
+Pasó `validar.py` 0/0, `comparar.py` código 0 y una revisión visual «sin observaciones»
+con defectos que se repetían en todo el libro. Lo que se encontró después:
+
+| ID | Qué | Estado |
+|---|---|---|
+| G10 | `\salto` antes de un `#` deja una página en blanco: `manual.py` ya pone un salto antes de cada capítulo (salvo el primero). 21 páginas en blanco en el manual. | **Avisado**: `validar.py` da aviso; `revisar.py` lista las páginas casi vacías. Con prueba. `manual.py` no se cambió (un salto pedido a propósito sigue funcionando). |
+| G11 | Lista dentro de un cuadro `> [!...]`: `manual.py` une los renglones de cada párrafo del cuadro, así que los ítems salen en un solo párrafo con los guiones a la vista. 15 cuadros. | **Avisado** en `validar.py`, con prueba. Forma correcta documentada en `generator.md` (renglón `>` vacío entre ítems, `•`). **Pendiente**: que `manual.py` dibuje listas dentro de los cuadros. |
+| G12 | Código (`` ` ``) en una celda de encabezado de tabla: sale como un recuadro blanco sobre el color del encabezado. | **Avisado** en `validar.py`, con prueba. **Los manuales 1 a 4 tienen 2 encabezados así cada uno** (validar ahora da 0 errores y 2 avisos): sin corregir, a la espera del usuario. |
+| G13 | Tabla de 3 columnas con mucho texto: una columna queda con una palabra por renglón y un código se parte. | Documentado en `generator.md` (celdas cortas, explicación en una lista). Sin aviso automático: lo ve la revisión de cerca. |
+| V5 | El muestreo de `revisar.py` (seis páginas) no ve defectos repetidos. | **Resuelto en parte**: lista de páginas casi vacías en `revisar.py`; `verificar-pdf` y `actualizar-manual` piden revisar de cerca las páginas de una sección nueva o cambiada (ubicadas por su texto) y una con cuadro y otra con tabla. |
+| W1 | Páginas de learn.mongodb.com armadas con JavaScript: WebFetch solo recibe el título. | Rodeo documentado en `nuevo-manual`: variante `.md` de las páginas de documentación, referencia de la API, fuentes secundarias que citan la oficial (marcadas). |
+| S1 | Script de Python que reescribe un `.md` en Windows sin `newline=""`: duplica los fines de línea. | Documentado en `nuevo-manual` y `actualizar-manual` (copia en el scratchpad y `diff` antes de instalar). |
+
+Pruebas: 151, todas OK.

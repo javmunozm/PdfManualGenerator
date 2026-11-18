@@ -177,3 +177,66 @@ cuatro manuales. Regla 2 de `CLAUDE.md`, `traductor.md` y `traducir-manual` al d
   `/no-existe`), nombres de personas, `<html lang="es">`, y la salida de `dotnet` en español
   citada junto a la inglesa («Compilación correcta» / «Build succeeded»).
 - Revisión visual de los cuatro antes de la segunda vuelta: sin problemas de formato.
+
+## 2026-11-18 · MongoDB (manual nuevo, skill `nuevo-manual`)
+
+- Manual de preparación para el examen MongoDB Associate Developer (C#), en inglés, sin
+  archivo en `sources/`: contenido investigado en la web (documentación oficial del driver
+  C# 3.x, manual del servidor, Atlas Search). Notas y URL en
+  `documentos/MongoDB/investigacion.md`.
+- Escrito por partes en `documentos/MongoDB/partes/` (10 archivos) y unido en
+  `MongoDB.md`; las partes se borraron al terminar. Teoría por dominio del examen,
+  glosario, 14 ejercicios, 3 exámenes de práctica de 60 preguntas originales con
+  explicación de cada opción, resumen final y referencias.
+- **No se pudo:** leer las páginas de MongoDB University (guía oficial del examen, cursos
+  y quizzes): se generan con JavaScript y WebFetch solo recibe el título. Los objetivos
+  salen de dos repositorios que dicen seguir la guía oficial. Sin confirmar: número de
+  preguntas (~53) y nota de aprobación.
+- **Falló y se corrigió:** `validar.py` marcó `[!IMPORTANT]` (el tipo es `[!IMPORTANTE]`)
+  y una negrita con código; `comparar.py` marcó «question's» y «`$inc`s» (se reescribieron).
+  Un heredoc de Bash con el texto de las notas falló por las comillas: se usó Edit.
+- Resultado: validar 0/0, `comparar --estricto` código 0, 176 páginas, 572 KB; revisor
+  visual sin observaciones.
+- v1.1 (mismo día, skill `actualizar-manual`): comprobado que no hay cambios de temario en
+  2026 (notas en `investigacion.md`). Se agregó el apéndice «Beyond the Blueprint» con los
+  temas extra de una guía no oficial (Certsqill): validación de esquema, change streams,
+  transacciones, Atlas Charts y Data Federation, con código C#, y 5 preguntas extra. API C#
+  comprobada en la referencia 3.13.0. validar 0/0, `comparar --estricto` código 0,
+  185 páginas, 608 KB.
+- v1.2 (a pedido del usuario): sección de `$out` a S3 verificada completa contra
+  docs/atlas/data-federation/supported-unsupported/pipeline/out (campos, obligatorios,
+  valores por defecto, `errorMode`, nombres de archivo, privilegios) y reescrita; ejemplo C#
+  propio con esos campos. El formato exacto de la cadena de conexión de una instancia
+  federada no aparece en la documentación: el texto dice copiarla del diálogo Connect.
+  Revisión visual de las páginas 174-183 del apéndice (dos hojas a 80 dpi).
+- **Falló y se corrigió (revisión visual de v1.2):**
+  - Las viñetas dentro de los cuadros `> [!...]` salían como un solo párrafo, porque
+    `manual.py` une los renglones de cada párrafo de un cuadro. Se separó cada viñeta con
+    `>` vacío y `•` (63 viñetas en 15 cuadros).
+  - El código en celdas de encabezado de tabla salía como un recuadro blanco sobre el verde:
+    se quitaron las comillas invertidas en 7 encabezados.
+  - Había 21 páginas en blanco, porque cada `#` ya empieza página y el `\salto` previo
+    agregaba otra: se quitaron los 21 `\salto` antes de capítulo.
+  - La tabla de conteo era demasiado angosta: se rehízo en 4 columnas más una lista.
+  - Las tres primeras correcciones se hicieron con scripts sobre una copia en el scratchpad.
+    La primera versión del script cambió los fines de línea (escritura en modo texto en
+    Windows); se vio en el diff de la copia y se corrigió con `newline=""`. El `.md` real
+    no se tocó hasta que el diff fue el esperado.
+  - Un `sed` por número de línea apuntó a la línea equivocada (corrida de una); se usó Edit.
+- Resultado v1.2: validar 0/0, `comparar --estricto` código 0, 165 páginas, 598 KB, sin
+  páginas vacías (barrido de todas las páginas con PyMuPDF). El revisor visual confirmó las
+  correcciones en 155-164 y 33.
+
+## 2026-11-18 · Lecciones del manual MongoDB a herramientas, guías y skills
+
+- `tools/validar.py`: tres avisos nuevos (salto antes de capítulo, lista dentro de un
+  cuadro, código en el encabezado de una tabla). `tools/revisar.py`: lista las páginas casi
+  vacías. Seis pruebas nuevas en `tests/test_mejoras.py` (`FormatoDeManualNuevo`); 151
+  pruebas OK.
+- `docs/generator.md` (sintaxis, problemas frecuentes, verificación final),
+  `docs/auditoria.md` (sección 15) y las skills `nuevo-manual`, `verificar-pdf` y
+  `actualizar-manual`.
+- **Efecto en manuales terminados:** los manuales 1 a 4 pasan a 0 errores y 2 avisos (G12:
+  código en dos encabezados de tabla cada uno). No se tocaron: queda a decisión del usuario.
+- Las pruebas se corren con `python -m unittest discover tests`; `python -m unittest
+  tests.test_mejoras` falla al importar `test_pipeline` (no es un error del código).

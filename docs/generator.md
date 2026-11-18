@@ -281,13 +281,13 @@ idioma: es
 | Negrita, cursiva, código, enlace | `**texto**`, `*texto*`, `` `texto` ``, `[texto](https://...)` |
 | Lista con viñetas / numerada | `- ítem` / `1. ítem`. La numerada empieza en el número escrito (`5.` sigue en 6, 7). Puede haber líneas vacías entre ítems. |
 | Lista dentro de otra | El ítem hijo lleva 2 espacios o más de sangría que su padre. |
-| Tabla | `\| A \| B \|` + `\|---\|---\|` + filas |
+| Tabla | `\| A \| B \|` + `\|---\|---\|` + filas. Sin código (`` ` ``) en el encabezado: sale como un recuadro blanco sobre el color. Con 3 columnas o más, celdas cortas: el texto largo va en una lista debajo de la tabla. |
 | Código | bloque entre ```` ``` ````. Cada renglón queda entero: si no cabe, se reduce la letra del bloque (hasta 7 pt, unos 100 caracteres); si aun así no cabe, se parte en un espacio y la continuación lleva una marca gris. |
 | Código con título | ```API/Program.cs en la línea que abre el bloque: el título sale en una franja arriba del recuadro y no es parte del código. Una palabra corta en minúsculas (```python, ```bash) es el lenguaje y se ignora. Al traducir, el título se traduce si es texto («Raíz del proyecto»), no si es un nombre de archivo. |
-| Cuadro destacado | `> [!NOTA]`, `[!CONSEJO]`, `[!ADVERTENCIA]`, `[!IMPORTANTE]`, `[!EJERCICIO]` (+ título opcional) |
+| Cuadro destacado | `> [!NOTA]`, `[!CONSEJO]`, `[!ADVERTENCIA]`, `[!IMPORTANTE]`, `[!EJERCICIO]` (+ título opcional). Los renglones de un párrafo del cuadro se unen: una lista se escribe con un renglón `>` vacío entre ítems y cada ítem empieza con `•` (`> • texto`). |
 | Cita simple | `> texto` |
 | Imagen con pie | `![pie de figura](ruta/imagen.png)` en una línea sola |
-| Salto de página | `\salto` en una línea sola |
+| Salto de página | `\salto` en una línea sola. **Nunca antes de un `#`**: cada capítulo ya empieza página y el salto deja una en blanco. |
 | Comentario (no se imprime) | `<!-- texto -->` |
 
 No se admiten celdas combinadas ni notas al pie: convertirlas en filas repetidas o en un
@@ -317,6 +317,12 @@ python tools/revisar.py output/X/X.pdf --paginas 12 --dpi 110  # una página de 
 
 El script dice qué página es cada una. Las imágenes las mira el subagente `revisor-visual`.
 
+- [ ] `revisar.py` dice «Sin páginas vacías». El muestreo de seis páginas no ve un defecto
+      que se repite (21 páginas en blanco pasaron una revisión «sin observaciones»).
+- [ ] Una sección nueva o cambiada se mira entera: ubicar sus páginas buscando su texto con
+      PyMuPDF y pasarlas con `--paginas` (hasta 4 por imagen, dos imágenes; 80 dpi para ver
+      la disposición, 110 para leer código). Incluir siempre una página con cuadro y una
+      con tabla.
 - [ ] El índice tiene todos los títulos y los marcadores funcionan.
 
 ---
@@ -347,5 +353,75 @@ El script dice qué página es cada una. Las imágenes las mira el subagente `re
 | `[Imagen no encontrada: ...]` en el PDF | La ruta es relativa al `.md`; revisar mayúsculas y carpeta. |
 | Números dobles en títulos ("1. 1. Introducción") | Títulos ya numerados con `numerar: si`: usar `numerar: no` o quitar los números. |
 | PDF muy pesado | Bajar `dpi_imagenes` o recortar imágenes. |
+| Páginas en blanco al final de cada capítulo | Un `\salto` antes de `#`: quitarlo. `validar.py` lo avisa y `revisar.py` lista las páginas casi vacías. |
+| Las viñetas de un cuadro salen en un solo párrafo, con los guiones a la vista | Separar los ítems con un renglón `>` vacío y empezar cada uno con `•`. `validar.py` lo avisa. |
+| Celda de encabezado de tabla en blanco sobre el color | Tiene código (`` ` ``): quitar las comillas invertidas. `validar.py` lo avisa. |
+| Una columna de tabla sale con una palabra por renglón | Demasiado texto en una tabla de 3 columnas o más: dejar en la tabla datos cortos y pasar las explicaciones a una lista debajo. |
+| Negrita alrededor de código (`` **`x`** ``) da «negrita mal cerrada» | Escribir solo el código, o la negrita sobre otras palabras. |
 | Tabla muy angosta o cortada | Demasiadas columnas: dividirla en dos tablas o abreviar encabezados. |
 | Un cuadro `> [!NOTA]` sale como cita gris | El tipo está mal escrito o falta `!`. |
+
+---
+
+## 11. Manual nuevo sin origen: lecciones
+
+Lo aprendido al escribir el manual MongoDB (skill `nuevo-manual`, 18/11/2026). El detalle
+de lo que falló está en `docs/auditoria.md`, sección 15.
+
+### Investigación
+
+- **Verificar todo lo verificable.** Un dato que el lector va a usar (sintaxis, campos,
+  valores por defecto, opciones) no se entrega «sin verificar» si existe la página que lo
+  dice. Si un detalle no está en ninguna página (por ejemplo, el formato exacto de una
+  cadena de conexión), el texto lo dice y remite a la fuente; no se inventa.
+- **Páginas armadas con JavaScript** (learn.mongodb.com y similares): WebFetch solo recibe
+  el título. Probar la variante `.md` de la página de documentación (`<url>.md`, que además
+  muestra los ejemplos que la página esconde en pestañas), la referencia de la API en su
+  versión exacta, o fuentes secundarias que citen la oficial. En `investigacion.md`, marcar
+  cuáles son secundarias.
+- **Vigencia.** Anotar la fecha de consulta y buscar si hubo cambios en el año en curso
+  (temario, versión, API). Un informe de «está vigente» dice en qué fuentes se apoya y qué
+  no se pudo leer.
+- **Fuentes que no coinciden.** La principal manda en el cuerpo del manual. Lo que solo
+  dice otra fuente va en un apéndice («más allá del temario»), como seguro, **escrito para
+  el lenguaje o contexto del manual**: si la fuente muestra Python y Node.js y el manual es
+  de C#, el apéndice va en C#.
+
+### Redacción
+
+- Palabras, ejemplos y datos de muestra propios: no reutilizar los conjuntos de ejemplo de
+  la documentación cambiando un par de valores.
+- Un manual largo se escribe por partes en `documentos/<n>/partes/NN.md`, una por mensaje,
+  y se une en `<n>.md`. Desde ahí el `.md` es la fuente y las partes se borran.
+- Un script que reescribe el `.md` en Windows abre el archivo con `newline=""` (si no,
+  duplica los fines de línea) y se prueba en una copia del scratchpad mirando el `diff`
+  antes de instalarlo. Para un cambio puntual, `Edit`; no `sed` por número de línea.
+
+### Formato (lo avisa `validar.py`)
+
+- `\salto` nunca antes de `#`: cada capítulo ya empieza página.
+- Lista dentro de un cuadro: `> • ítem`, con un renglón `>` vacío entre ítems.
+- Sin código en el encabezado de una tabla; sin negrita alrededor de código.
+- Tablas de 3 columnas o más con celdas cortas; las explicaciones, en una lista debajo
+  (esto no lo avisa: lo ve la revisión de cerca).
+
+### Manual de preparación de un examen o certificación
+
+- Partir del temario oficial (objetivos y pesos) y citar el código de cada objetivo en la
+  teoría y en las preguntas, para que el lector vea sus puntos débiles.
+- Por capítulo: teoría con la sintaxis del examen y la del lenguaje del manual lado a lado,
+  y al final un cuadro «Trampas del examen» («Exam traps»).
+- Además: glosario, ejercicios paso a paso con la explicación de por qué sale cada
+  resultado, exámenes de práctica, resumen para la víspera y referencias.
+- Las preguntas son **originales**: nunca las reales del examen (son confidenciales) ni las
+  de los cuestionarios de cursos o insignias. La clave da la respuesta y explica **cada**
+  opción. Cada respuesta se comprueba contra los datos de la pregunta, documento por
+  documento.
+- Decir al lector qué datos del examen no publica la entidad (cantidad de preguntas, nota
+  de aprobación) y que los compare con la guía oficial al inscribirse.
+
+### Revisión visual
+
+- El muestreo de seis páginas no ve un defecto que se repite: `revisar.py` debe decir «Sin
+  páginas vacías», y las secciones nuevas se miran enteras con `--paginas`, ubicadas
+  buscando su texto en el PDF (sección 8).
