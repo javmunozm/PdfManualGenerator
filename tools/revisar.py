@@ -80,10 +80,20 @@ def risky(doc, skip):
 
 
 def blank_pages(doc, start):
-    """Páginas de contenido con solo encabezado y pie (5 renglones o menos): las que el
-    muestreo de páginas no ve, como un salto de página repetido al final de cada capítulo."""
-    return [p.number + 1 for p in doc
-            if p.number + 1 >= start and len(p.get_text().strip().splitlines()) <= 5]
+    """Páginas de contenido sin nada entre el encabezado y el pie: las que el muestreo no ve,
+    como un salto de página repetido al final de cada capítulo. Se mira solo la franja
+    central (el encabezado y el pie quedan en el 7% de arriba y de abajo), así que una
+    portadilla de parte, con su título y una línea, no cuenta como vacía."""
+    out = []
+    for p in doc:
+        if p.number + 1 < start:
+            continue
+        h = p.rect.height
+        body = [b for b in p.get_text("blocks")
+                if b[4].strip() and b[1] > 0.07 * h and b[3] < 0.93 * h]
+        if not body and not p.get_images():
+            out.append(p.number + 1)
+    return out
 
 
 def main():

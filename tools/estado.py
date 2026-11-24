@@ -11,7 +11,9 @@ Mira solo extracted/, documentos/ y output/ (nunca sources/) y dice, por documen
     extraído, sin preparar          hay extracted/<n>/ y no documentos/<n>/
     pendientes en la extracción     quedan figuras por describir, páginas por transcribir
                                     o símbolos sin identificar
-    traducción en curso             existe documentos/<n>/partes/
+    partes sin unir                 alguna parte de documentos/<n>/partes/ es más nueva que
+                                    el .md (traducción en curso, o un manual nuevo escrito
+                                    por partes que todavía no se unió)
     sin PDF                         hay documentos/<n>/<n>.md y no output/<n>/<n>.pdf
     PDF desactualizado              el .md es más nuevo que su PDF
     sin verificar / verificación fallida   según el registro que deja tools/comparar.py
@@ -61,9 +63,12 @@ def status(root="."):
             if not md.is_file():
                 todo.append("extraído, sin preparar")
         if md.is_file():
-            parts = docs / n / "partes"
-            if parts.is_dir() and any(parts.glob("*.md")):
-                todo.append(f"traducción en curso ({len(list(parts.glob('*.md')))} partes)")
+            # partes/ es la fuente mientras no se une: con capitulos.py unir o, en un manual
+            # nuevo escrito por partes, con su propio script. Unidas, el .md es más nuevo.
+            parts = sorted((docs / n / "partes").glob("*.md"))
+            newer = [p for p in parts if p.stat().st_mtime > md.stat().st_mtime + 1]
+            if newer:
+                todo.append(f"partes sin unir ({len(newer)} de {len(parts)} más nuevas que el .md)")
             if not pdf.is_file():
                 todo.append("sin PDF")
             elif md.stat().st_mtime > pdf.stat().st_mtime + 1:
@@ -80,10 +85,10 @@ def status(root="."):
 
 def stale(root="."):
     """Documentos cuyo PDF no refleja su .md o cuya verificación falló (hook de cierre).
-    Un documento sin PDF todavía, o con la traducción en curso, está en trabajo: no cuenta."""
+    Un documento sin PDF todavía, o con partes sin unir, está en trabajo: no cuenta."""
     out = []
     for n, todo in status(root):
-        if any(t.startswith("traducción en curso") or t == "sin PDF" for t in todo):
+        if any(t.startswith("partes sin unir") or t == "sin PDF" for t in todo):
             continue
         bad = [t for t in todo if t.startswith(("PDF desactualizado", "la última verificación"))]
         if bad:

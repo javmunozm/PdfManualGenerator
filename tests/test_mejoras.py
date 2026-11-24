@@ -764,6 +764,14 @@ class FormatoDeManualNuevo(Caso):
         self.assertEqual(rc, 0, out)
         self.assertIn("Páginas casi vacías", out)
 
+    def test_revisar_no_cuenta_una_portadilla_como_vacia(self):
+        md = self.md("parte", "# Parte I\n\nUna línea que presenta la parte.\n\n# Uno\n\nTexto.\n")
+        pdf = self.tmp / "parte.pdf"
+        self.assertEqual(run("manual.py", md, "-o", pdf)[0], 0)
+        rc, out = run("tools/revisar.py", pdf)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Sin páginas vacías", out)
+
 
 if __name__ == "__main__":
     unittest.main()

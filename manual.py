@@ -303,12 +303,18 @@ def code_title(fence):
 class CodeBlock(Flowable):
     """Recuadro de código en el que cada renglón del código ocupa un renglón.
 
-    Si algún renglón no cabe, primero se reduce la letra de todo el bloque (hasta
-    MIN_SIZE). Solo si aun así no cabe se parte: en un espacio, con sangría mayor que la
-    del renglón y una marca gris al inicio, para que se vea que es continuación.
+    Letra monoespaciada clara (DejaVu Sans Mono, de fonts/; Courier si falta) a 9 pt: unos
+    80 caracteres por renglón en carta. Si algún renglón no cabe, primero se reduce la
+    letra de todo el bloque (hasta MIN_SIZE). Solo si aun así no cabe se parte: en un
+    espacio, con sangría mayor que la del renglón y una marca gris al inicio, para que se
+    vea que es continuación. Las guías de sangría (una raya fina por nivel, como en un
+    editor) son dibujo, no texto: no entran al copiar ni a tools/comparar.py.
     """
-    FONT, SIZE, MIN_SIZE, PAD, GLYPH = "Courier", 8.5, 7.0, 6, 0.6   # GLYPH: ancho / tamaño
+    FONT = "DejaVuSansMono" if "DejaVuSansMono" in RESPALDO else "Courier"
+    GLYPH = stringWidth("M", FONT, 1)          # ancho de un carácter / tamaño de la letra
+    SIZE, MIN_SIZE, PAD, LINE = 9.0, 7.0, 6, 1.35   # LINE: interlineado / tamaño
     HEAD = 15                     # alto de la franja del título (nombre del archivo, «TERMINAL»)
+    INK, GUIDE = colors.HexColor("#1A1A1A"), colors.HexColor("#CFCFCF")
 
     def __init__(self, lines, accent, rows=None, size=None, title=""):
         super().__init__()
@@ -347,7 +353,7 @@ class CodeBlock(Flowable):
         self.width = availWidth
         if self.rows is None:
             self.size, self.rows = self._layout(availWidth)
-        self.leading = round(self.size * 1.3, 2)
+        self.leading = round(self.size * self.LINE, 2)
         self.height = len(self.rows) * self.leading + 2 * self.PAD + self.head
         return self.width, self.height
 
@@ -361,6 +367,41 @@ class CodeBlock(Flowable):
         # El título va solo en la primera parte: repetirlo metería texto que no está en el .md
         return [CodeBlock([], self.accent, self.rows[:fit], self.size, self.title),
                 CodeBlock([], self.accent, self.rows[fit:], self.size)]
+
+    def guides(self):
+        """(unidad, [(nivel, primer renglón, último renglón)]): guías de sangría, como en
+        un editor.
+        La unidad es la menor sangría del bloque (4 en Python, 2 en YAML o JS); con menos
+        de 2 (alineaciones de un espacio) no hay guías. Una continuación de renglón partido
+        y un renglón vacío no abren ni cortan niveles."""
+        indents, last = [], 0
+        for text, cont in self.rows:
+            if cont:
+                indents.append(last)
+            elif not text.strip():
+                indents.append(None)
+            else:
+                last = len(text) - len(text.lstrip(" "))
+                indents.append(last)
+        unit = min((i for i in indents if i), default=0)
+        if unit < 2:
+            return unit, []
+        levels = [None if i is None else i // unit for i in indents]
+        for k, lv in enumerate(levels):              # un vacío toma el menor de sus vecinos
+            if lv is None:
+                before = next((x for x in reversed(levels[:k]) if x is not None), 0)
+                after = next((x for x in levels[k + 1:] if x is not None), 0)
+                levels[k] = min(before, after)
+        out = []
+        for level in range(1, max(levels, default=0) + 1):
+            start = None
+            for k, lv in enumerate(levels + [0]):
+                if lv >= level and start is None:
+                    start = k
+                elif lv < level and start is not None:
+                    out.append((level, start, k - 1))
+                    start = None
+        return unit, out
 
     def draw(self):
         c = self.canv
@@ -391,8 +432,17 @@ class CodeBlock(Flowable):
                 c.lines([(x, y + self.size * 0.75, x, y + self.size * 0.25),
                          (x, y + self.size * 0.25, x + 1.3 * cw, y + self.size * 0.25)])
             y -= self.leading
-        c.setFillColor(colors.HexColor("#262626"))
-        y = self.height - self.PAD - self.size - self.head
+        top = self.height - self.PAD - self.size - self.head      # base del primer renglón
+        c.setStrokeColor(self.GUIDE)
+        c.setLineWidth(0.6)
+        unit, segments = self.guides()
+        for level, first, last in segments:
+            x = x0 + (level - 1) * unit * cw + 0.35 * cw
+            y1 = top - first * self.leading + self.size * 0.85
+            y2 = top - last * self.leading - self.size * 0.35
+            c.line(x, y1, x, y2)
+        c.setFillColor(self.INK)
+        y = top
         for text, _ in self.rows:
             if text.isascii():
                 c.setFont(self.FONT, self.size)
@@ -540,6 +590,7 @@ def split_row(row):
 
 
 ITEM = re.compile(r"(\s*)([-*+]|\d+[.)])\s+(.*)")       # ítem de lista: sangría, marca, texto
+LEAD_LABEL = re.compile(r"\*\*\[[A-ZÁÉÍÓÚÑ ]+\]\*\*")    # rótulo al inicio: **[READ ONLY]**
 
 
 class Builder:
@@ -802,7 +853,14 @@ class Builder:
 
         def flush():
             if para:
-                self.story.append(self.p(" ".join(x.strip() for x in para)))
+                text = " ".join(x.strip() for x in para)
+                # Un párrafo que presenta lo que sigue («...:» o un rótulo corto como
+                # «**[RUN]** Windows:») no queda solo al pie de la página: si no queda lugar
+                # para él y unos renglones de lo siguiente, empieza en la página siguiente.
+                # (keepWithNext movería entero un bloque largo y dejaría páginas a medias.)
+                if text.rstrip().endswith(":") or (LEAD_LABEL.match(text) and len(text) <= 200):
+                    self.story.append(CondPageBreak(3.5 * cm))
+                self.story.append(self.p(text))
                 para.clear()
 
         while i < len(lines):

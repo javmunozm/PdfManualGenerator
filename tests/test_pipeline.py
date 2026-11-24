@@ -294,7 +294,7 @@ class Generador(Caso):
 
     def test_G15_un_renglon_de_codigo_largo_no_se_parte_si_cabe_con_letra_menor(self):
         largo = '    """' + "palabra " * 10 + 'fin."""'                 # 94 caracteres
-        self.assertTrue(83 < len(largo) <= 100)                          # no cabe a 8,5 pt; sí a 7
+        self.assertTrue(80 < len(largo) <= 100)                          # no cabe a 9 pt; sí a 7
         _, pdf = self.generar("codigo", "# C\n\n```\ndef f():\n" + largo + "\n    return 1\n```\n")
         with pymupdf.open(pdf) as doc:
             renglones = [ln.strip() for ln in doc[2].get_text().splitlines()]
@@ -307,6 +307,25 @@ class Generador(Caso):
             texto = doc[2].get_text()
         self.assertNotRegex(texto, r"valor_\d?\n\s*\d")                 # ningún nombre cortado
         self.assertEqual(run("tools/comparar.py", md, pdf, "--estricto")[0], 0)
+
+    def test_G17_codigo_en_letra_mono_clara_con_una_guia_por_nivel_de_sangria(self):
+        codigo = ["def f(x):", "    if x:", "        return 1", "", "    return 0"]
+        md, pdf = self.generar("guias", "# C\n\n```\n" + "\n".join(codigo) + "\n```\n")
+        with pymupdf.open(pdf) as doc:
+            page = doc[2]
+            fuentes = {f[3] for f in page.get_fonts()}
+            renglones = page.get_text().splitlines()
+            gris = tuple(round(v / 255, 2) for v in (0xCF, 0xCF, 0xCF))   # color de las guías
+            verticales = [d for d in page.get_drawings() for it in d["items"]
+                          if it[0] == "l" and abs(it[1].x - it[2].x) < 0.1
+                          and abs(it[1].y - it[2].y) > 5
+                          and tuple(round(v, 2) for v in d.get("color") or ()) == gris]
+        self.assertTrue(any("DejaVuSansMono" in f for f in fuentes), fuentes)
+        for ln in codigo[:3]:
+            self.assertIn(ln, renglones)                                # la sangría, entera
+        xs = sorted({round(d["items"][0][1].x, 1) for d in verticales})
+        self.assertEqual(len(xs), 2, xs)                  # nivel 1 y nivel 2: dos columnas
+        self.assertEqual(run("tools/comparar.py", md, pdf, "--estricto")[0], 0)  # dibujo, no texto
 
 
     def test_G1_negrita_y_cursiva_juntas(self):

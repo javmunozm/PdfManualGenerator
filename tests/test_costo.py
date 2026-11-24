@@ -196,11 +196,20 @@ class EstadoYRevision(Caso):
         md, pdf = self.documento("listo")
         self.assertEqual(run("manual.py", md, "-o", pdf)[0], 0)
         self.assertEqual(run("tools/comparar.py", md, pdf, "--estricto")[0], 0)  # deja su registro
-        self.documento("borrador")
+        unida = md.parent / "partes" / "00.md"                  # escrito por partes y ya unido
+        unida.parent.mkdir()
+        unida.write_text("# T\n", encoding="utf-8")
+        os.utime(unida, (md.stat().st_mtime - 60, md.stat().st_mtime - 60))
+        md, _ = self.documento("borrador")
+        sin_unir = md.parent / "partes" / "01.md"                 # una parte cambiada después
+        sin_unir.parent.mkdir()
+        sin_unir.write_text("# T\n", encoding="utf-8")
+        os.utime(sin_unir, (md.stat().st_mtime + 60, md.stat().st_mtime + 60))
         rc, out = run("tools/estado.py", "--raiz", self.tmp, "--todo")
         self.assertEqual(rc, 0, out)
         for esperado in ("nuevo: pendientes en la extracción: 1 figuras por describir; extraído, sin preparar",
-                         "viejo: PDF desactualizado", "sinver: PDF sin verificar", "borrador: sin PDF",
+                         "viejo: PDF desactualizado", "sinver: PDF sin verificar",
+                         "borrador: partes sin unir (1 de 1 más nuevas que el .md); sin PDF",
                          "listo: terminado", "5 documentos, 4 con algo pendiente"):
             self.assertIn(esperado, out)
         self.assertNotIn("listo", run("tools/estado.py", "--raiz", self.tmp)[1])

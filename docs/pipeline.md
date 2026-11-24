@@ -174,7 +174,7 @@ Los tokens que muestran las herramientas son aproximados (caracteres / 3,5).
 | Hook `guardia.py` (PreToolUse) | `.claude/hooks/`, `.claude/settings.json` | Deniega editar `sources/`; pide confirmación para leerlo o nombrarlo en un comando; deniega leer PDF y Office directamente. También pide confirmación si se llega a `sources/` sin nombrarlo: `Glob` de `**/*`, listado recursivo desde la raíz, comodines, o un encargo a un subagente (H6). |
 | Hook `guardia.py` que falla | `.claude/hooks/guardia.py` | Si no puede leer la llamada o falla por dentro, pide confirmación en vez de dejarla pasar. |
 | Hook `flujo.py` (PostToolUse en Edit y Write) | `.claude/hooks/`, `.claude/settings.json` | Al editar `documentos/<n>/<n>.md` o `extracted/<n>/<n>.md`, ejecuta `validar.py` y devuelve los errores a Claude en el momento. Sin errores no dice nada. |
-| Hook `flujo.py` (Stop) | igual | Si un PDF quedó más viejo que su `.md`, o su última verificación falló, lo dice una vez antes de cerrar el turno. No cuenta un documento sin PDF todavía ni con la traducción en curso. |
+| Hook `flujo.py` (Stop) | igual | Si un PDF quedó más viejo que su `.md`, o su última verificación falló, lo dice una vez antes de cerrar el turno. No cuenta un documento sin PDF todavía ni con partes sin unir (una parte de `partes/` más nueva que el `.md`). |
 | Hook `flujo.py` (SessionStart) | igual | Agrega al contexto el resumen de `tools/estado.py`: documentos con algo pendiente. |
 | Reglas de permiso | `.claude/settings.json` | `deny` editar `sources/`, `ask` leerlo. |
 | No pisar trabajo manual | `extraer.py`, `preparar.py`, `capitulos.py` | Se niegan si el destino ya existe; con `--forzar` guardan `<n>.anterior.md`. |
